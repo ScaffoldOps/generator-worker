@@ -1,94 +1,74 @@
-# generator-worker
-
-Asynchronous worker service for **ScaffoldOps** responsible for processing generation jobs after they are accepted by `generator-api`.
+# Generator Worker
 
 ## Purpose
+`generator-worker` is the ScaffoldOps microservice responsible for asynchronously consuming generation jobs after they are accepted by `generator-api`.
 
-`generator-worker` is part of the ScaffoldOps platform, whose goal is to automate the generation and deployment of standardized microservices on Kubernetes. In the platform architecture, `generator-api` acts as the synchronous entrypoint, while `generator-worker` handles the long-running generation work asynchronously. :contentReference[oaicite:0]{index=0}
+## What This Service Does
+- Consumes generation-requested events from Kafka
+- Orchestrates placeholder generation job handling
+- Emits placeholder lifecycle status updates for generation stages
+- Exposes actuator health endpoints for platform operations
 
-This service exists to keep request handling separate from execution. It should consume generation work published by `generator-api`, generate the requested microservice from a template, and update lifecycle status as the work progresses. This separation keeps the API simple and moves retries, failures, and longer-running processing outside the request/response path. :contentReference[oaicite:1]{index=1}
+## What This Service Does Not Do Yet
+- Does not expose the public request API
+- Does not implement the full generation engine
+- Does not persist generation request state
+- Does not implement deployment-worker responsibilities
+- Does not perform real lifecycle update calls yet
 
-## Responsibilities
+## Architecture
+Hexagonal (ports and adapters):
+- `domain`: worker job and event models
+- `application`: worker use case and outbound ports
+- `infrastructure`: Kafka consumer, lifecycle adapter, generation adapter, configuration
 
-`generator-worker` should own:
+Dependency direction:
+`infrastructure -> application -> domain`
 
-- consuming generation jobs or events produced by `generator-api`
-- loading the generation request data needed for processing
-- generating the microservice project from the selected template
-- producing the standard project structure and supporting files
-- updating lifecycle status during the generation phase
-- reporting success or failure back through persisted lifecycle state
+There is intentionally no public API layer in this service shell because this service is a background worker, not the synchronous platform entrypoint.
 
-## What it should not do
+## Main Tech Stack
+- Java 17
+- Spring Boot 3
+- Spring Kafka
+- Spring Web and Actuator for health/runtime operations
+- Maven
 
-`generator-worker` should not:
+## Run
+Start the worker locally with the `local` Spring profile:
 
-- expose the main public API for request submission
-- validate incoming client HTTP requests
-- act as the system of record for generation requests
-- replace `generator-api` as the lifecycle query endpoint
+```bash
+SPRING_PROFILES_ACTIVE=local ./mvnw spring-boot:run
+```
 
-If deployment is later separated into its own service, `generator-worker` should also not own Kubernetes deployment. For the MVP, that concern may remain combined temporarily if needed, but the intended architecture keeps generation and deployment conceptually distinct. :contentReference[oaicite:2]{index=2}
+Useful environment variables:
+- `KAFKA_BOOTSTRAP_SERVERS`
+- `KAFKA_CONSUMER_GROUP`
+- `GENERATION_REQUESTED_TOPIC`
+- `GENERATOR_API_BASE_URL`
+- `SERVER_PORT`
 
-## Role in the platform flow
+## Test
+```bash
+./mvnw test
+```
 
-A typical ScaffoldOps flow is:
+## Runtime Endpoints
+- Actuator health: `/actuator/health`
+- Liveness probe: `/actuator/health/liveness`
+- Readiness probe: `/actuator/health/readiness`
 
-1. the client sends a generation request to `generator-api`
-2. `generator-api` validates and persists the request
-3. `generator-api` assigns an initial status such as `RECEIVED`
-4. `generator-api` publishes a generation job or event
-5. `generator-worker` consumes that job
-6. `generator-worker` updates the request to a generation-in-progress state
-7. `generator-worker` generates the project from the requested template
-8. `generator-worker` updates the request to `GENERATED` or `FAILED`
+## Docker
+```bash
+./mvnw clean package -DskipTests
+docker build -f Dockerfile -t scaffoldops/generator-worker:latest .
+```
 
-This makes `generator-worker` the execution component for the generation phase, while `generator-api` remains the public lifecycle/status entrypoint for clients. :contentReference[oaicite:3]{index=3}
+## Kubernetes
+Deployment assets live under `k8s/`:
+- `k8s/deployment`
 
-## Lifecycle ownership
+This repository owns the worker application manifests and runtime configuration only.
 
-The lifecycle is shared across services by stage:
-
-- `generator-api` creates the request and sets the initial state
-- `generator-worker` owns the generation-stage transitions
-- a future `deployment-worker` can own deployment-stage transitions
-
-Example lifecycle progression:
-
-- `RECEIVED`
-- `GENERATING`
-- `GENERATED`
-- `DEPLOYING`
-- `DEPLOYED`
-- `FAILED`
-
-For `generator-worker`, the relevant transitions are typically:
-
-- `RECEIVED -> GENERATING`
-- `GENERATING -> GENERATED`
-- `GENERATING -> FAILED`
-
-## Expected inputs
-
-`generator-worker` is expected to process generation work created by `generator-api`.
-
-That work should represent a generation request containing, at minimum, fields such as:
-
-- request id
-- service name
-- template
-- deployment target
-- optional capabilities such as database, REST API, security, and messaging
-
-The initial request contract in ScaffoldOps was defined around a declarative payload similar to:
-
-```json
-{
-  "name": "billing-service",
-  "template": "spring-boot-hexagonal",
-  "database": true,
-  "restApi": true,
-  "security": true,
-  "messaging": false,
-  "deploymentTarget": "kubernetes"
-}
+## Notes
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the current worker shell boundaries and the next implementation phase.

@@ -1,0 +1,7 @@
+spring:
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
+app:
+  lifecycle:
+    base-url: ${GENERATOR_API_BASE_URL:http://localhost:8081}

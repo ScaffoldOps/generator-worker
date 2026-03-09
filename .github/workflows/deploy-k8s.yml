@@ -1,0 +1,52 @@
+name: Deploy generator-worker to Kubernetes
+
+on:
+  workflow_call:
+    inputs:
+      namespace:
+        required: true
+        type: string
+      environment_name:
+        required: true
+        type: string
+      spring_profile:
+        required: true
+        type: string
+      image_version:
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    environment: ${{ inputs.environment_name }}
+    env:
+      NAMESPACE: ${{ inputs.namespace }}
+      ENVIRONMENT_NAME: ${{ inputs.environment_name }}
+      SPRING_PROFILE: ${{ inputs.spring_profile }}
+      IMAGE_NAME: victodomvar/scaffoldops-generator-worker
+      IMAGE_VERSION: ${{ inputs.image_version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.32.0
+
+      - name: Deploy application
+        run: |
+          set -euo pipefail
+          kubectl config use-context minikube
+          kubectl cluster-info
+
+          kubectl get namespace "${NAMESPACE}" >/dev/null 2>&1 || kubectl create namespace "${NAMESPACE}"
+
+          kubectl apply -n "${NAMESPACE}" -f k8s/deployment/generator-worker-service.yaml
+          sed -e "s|image: .*|image: ${IMAGE_NAME}:${IMAGE_VERSION}|" \
+              -e "s|value: \"dev\"|value: \"${SPRING_PROFILE}\"|" \
+              k8s/deployment/generator-worker-deployment.yaml \
+            | kubectl apply -n "${NAMESPACE}" -f -
+          kubectl rollout status deployment/generator-worker-deployment -n "${NAMESPACE}" --timeout=300s
+          kubectl wait --for=condition=ready pod -l app=generator-worker -n "${NAMESPACE}" --timeout=300s

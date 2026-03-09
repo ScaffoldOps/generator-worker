@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: generator-worker-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: generator-worker
+  template:
+    metadata:
+      labels:
+        app: generator-worker
+    spec:
+      containers:
+        - name: generator-worker
+          image: victodomvar/scaffoldops-generator-worker:develop
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: "dev"
+            - name: KAFKA_CONSUMER_GROUP
+              value: "generator-worker"
+            - name: GENERATOR_API_BASE_URL
+              value: "http://generator-api-service"
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 15
