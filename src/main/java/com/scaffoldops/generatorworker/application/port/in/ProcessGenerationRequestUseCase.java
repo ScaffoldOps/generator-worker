@@ -3,7 +3,7 @@ package com.scaffoldops.generatorworker.application.port.in;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
-public interface ProcessGenerationJobUseCase {
+public interface ProcessGenerationRequestUseCase {
 
     void process(Command command);
 
@@ -16,6 +16,7 @@ public interface ProcessGenerationJobUseCase {
             boolean security,
             boolean messaging,
             String deploymentTarget,
+            String status,
             OffsetDateTime createdAt
     ) {
     }

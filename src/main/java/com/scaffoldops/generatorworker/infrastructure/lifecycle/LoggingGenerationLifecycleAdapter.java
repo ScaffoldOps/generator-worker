@@ -23,7 +23,7 @@ public class LoggingGenerationLifecycleAdapter implements GenerationLifecyclePor
     @Override
     public void updateStatus(GenerationLifecycleUpdate update) {
         log.info(
-                "Placeholder lifecycle update for requestId={} status={} targetBaseUrl={} detail={}",
+                "Placeholder lifecycle update requestId={} status={} targetBaseUrl={} detail={} workerService=generator-worker",
                 update.requestId(),
                 update.status(),
                 lifecycleBaseUrl,

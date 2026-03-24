@@ -1,46 +1,26 @@
 # Generator Worker
 
-`generator-worker` is the ScaffoldOps background worker responsible for consuming generation jobs from Kafka and driving the generation lifecycle asynchronously.
+`generator-worker` is the ScaffoldOps background worker responsible for consuming generation requests from Kafka and advancing generation lifecycle stages asynchronously.
 
-## Current behavior
+## Consumed Kafka topic
 
-The service currently implements the worker shell and placeholder execution flow:
+- Topic: `generation-requested`
+- Consumer group: `generator-worker`
 
-- Consumes `GenerationRequestedEvent` messages from Kafka
-- Maps the event into an internal `GenerationJob`
-- Emits lifecycle updates through the lifecycle port with these status transitions:
-  - `GENERATING` when the worker accepts the job
-  - `GENERATED` when the placeholder generation flow completes
-  - `FAILED` if the generation adapter throws
-- Logs lifecycle updates instead of calling a real downstream API
-- Logs placeholder generation execution instead of producing project artifacts
-- Exposes Spring Boot actuator health and info endpoints
+In `dev`, Kafka defaults to `kafka.scaffoldops-dev.svc.cluster.local:9092`.
 
-## Current limitations
+## High-level flow
 
-- No real project generation engine yet
-- No outbound HTTP integration for lifecycle updates yet
-- No persistence layer in this service
-- No public business API; this is a worker-only service
-- No retry, dead-letter, or idempotency workflow beyond Kafka consumer defaults
-
-## Architecture
-
-The codebase follows a ports-and-adapters layout:
-
-- `domain`: event and model records
-- `application`: use case plus inbound and outbound ports
-- `infrastructure`: Kafka consumer, adapter implementations, and configuration
-
-Dependency direction:
-
-`infrastructure -> application -> domain`
-
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the detailed flow and extension points.
+1. `generator-api` publishes a JSON `generation-requested` event to Kafka.
+2. `generator-worker` consumes the event through `GenerationRequestedKafkaListener`.
+3. The listener validates required fields and logs receipt with `requestId` and requested service name.
+4. `ProcessGenerationRequestService` owns the placeholder lifecycle flow:
+   `RECEIVED -> GENERATING -> GENERATED`
+5. If placeholder processing throws, the service emits `FAILED`.
 
 ## Event contract
 
-The Kafka consumer expects JSON messages compatible with `GenerationRequestedEvent`:
+The worker expects JSON compatible with `GenerationRequestedEvent`:
 
 ```json
 {
@@ -53,62 +33,86 @@ The Kafka consumer expects JSON messages compatible with `GenerationRequestedEve
   "messaging": false,
   "deploymentTarget": "kubernetes",
   "status": "REQUESTED",
-  "createdAt": "2026-03-16T10:15:30Z"
+  "createdAt": "2026-03-24T10:15:30Z"
 }
 ```
 
-Notes:
+Required fields currently validated by the Kafka adapter:
 
-- `status` is currently carried on the inbound event model but is not used by the worker flow
-- The consumer uses Spring Kafka `JsonDeserializer` with `GenerationRequestedEvent` as the default value type
-- The listener subscribes to `app.kafka.topics.generation-requested`
+- `requestId`
+- `name`
+- `template`
+- `database`
+- `restApi`
+- `security`
+- `messaging`
+- `deploymentTarget`
+- `status`
+- `createdAt`
 
-## Runtime configuration
+## Configuration
 
-Core configuration lives in [`src/main/resources/application.yml`](/home/victor/workspace/ScaffoldOps/generator-worker/src/main/resources/application.yml).
+Main runtime properties:
 
-Main environment variables:
+- `KAFKA_BOOTSTRAP_SERVERS`
+- `KAFKA_CONSUMER_GROUP`
+- `GENERATION_REQUESTED_TOPIC`
+- `GENERATOR_API_BASE_URL`
+- `SERVER_PORT`
 
-- `SERVER_PORT`: HTTP port for actuator endpoints, default `8080`
-- `KAFKA_BOOTSTRAP_SERVERS`: Kafka bootstrap servers, default `localhost:9092`
-- `KAFKA_CONSUMER_GROUP`: Kafka consumer group, default `generator-worker`
-- `GENERATION_REQUESTED_TOPIC`: inbound topic name, default `generation-requested`
-- `GENERATOR_API_BASE_URL`: placeholder lifecycle target base URL, default `http://generator-api-service`
+Kafka settings are configured explicitly in `src/main/resources/application.yml`:
+
+- JSON deserialization via Spring Kafka `JsonDeserializer`
+- default payload type `GenerationRequestedEvent`
+- consumer group `generator-worker`
+- listener `ack-mode=record`
+- listener concurrency `1`
 
 Profile overrides:
 
-- `local`: points the lifecycle base URL to `http://localhost:8081`
-- `dev`: points Kafka and lifecycle integration to `scaffoldops-dev` cluster service DNS
-- `pre`: points Kafka and lifecycle integration to `scaffoldops-pre` cluster service DNS
+- `local`: local lifecycle base URL
+- `dev`: Kafka `kafka.scaffoldops-dev.svc.cluster.local:9092`
+- `pre`: pre environment service DNS values
 
-## Run locally
+## Architecture
 
-Start the worker with the local profile:
+Hexagonal boundaries are kept explicit:
+
+- `domain`: message contract and lifecycle/request models
+- `application`: `ProcessGenerationRequestUseCase` plus outbound ports
+- `infrastructure`: Kafka listener, Kafka config, placeholder lifecycle adapter, placeholder generation adapter
+
+Dependency direction:
+`infrastructure -> application -> domain`
+
+There is intentionally no public API layer in this service because it is a worker, not the synchronous entrypoint.
+
+## Current limitations
+
+- No real generation engine yet
+- No persistence layer in this service yet
+- No real generator-api request-state update integration yet
+- No retry, dead-letter, or idempotency workflow yet
+
+## Run
+
+Start the worker locally with the `local` profile:
 
 ```bash
 SPRING_PROFILES_ACTIVE=local ./mvnw spring-boot:run
 ```
 
-Build the jar:
-
-```bash
-./mvnw clean package
-```
-
-Run the test suite:
+## Test
 
 ```bash
 ./mvnw test
 ```
 
-## Operational endpoints
-
-The service does not expose application business endpoints. Only actuator endpoints are available:
+## Runtime endpoints
 
 - `/actuator/health`
 - `/actuator/health/liveness`
 - `/actuator/health/readiness`
-- `/actuator/info`
 
 ## Docker
 
@@ -119,23 +123,8 @@ docker build -f Dockerfile -t scaffoldops/generator-worker:latest .
 
 ## Kubernetes
 
-Deployment manifests live under [`k8s/deployment`](/home/victor/workspace/ScaffoldOps/generator-worker/k8s/deployment):
+Deployment assets live under `k8s/deployment`.
 
-- [`generator-worker-deployment.yaml`](/home/victor/workspace/ScaffoldOps/generator-worker/k8s/deployment/generator-worker-deployment.yaml)
-- [`generator-worker-service.yaml`](/home/victor/workspace/ScaffoldOps/generator-worker/k8s/deployment/generator-worker-service.yaml)
+## Notes
 
-The included deployment currently:
-
-- Runs one replica
-- Uses the `dev` Spring profile
-- Exposes container port `8080`
-- Configures TCP liveness and readiness probes on port `8080`
-
-## Testing
-
-Current automated coverage is focused on:
-
-- Application context startup
-- Worker service status transitions for success and failure paths
-
-There are no integration tests for Kafka consumption or downstream lifecycle delivery yet.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the current worker boundaries.

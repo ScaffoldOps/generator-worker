@@ -32,7 +32,7 @@ public class KafkaConfiguration {
     }
 
     @Bean
-    ConcurrentKafkaListenerContainerFactory<String, GenerationRequestedEvent> kafkaListenerContainerFactory(
+    ConcurrentKafkaListenerContainerFactory<String, GenerationRequestedEvent> generationRequestedKafkaListenerContainerFactory(
             ConsumerFactory<String, GenerationRequestedEvent> generationRequestedEventConsumerFactory
     ) {
         ConcurrentKafkaListenerContainerFactory<String, GenerationRequestedEvent> factory =

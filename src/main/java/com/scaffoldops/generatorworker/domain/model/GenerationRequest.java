@@ -3,7 +3,7 @@ package com.scaffoldops.generatorworker.domain.model;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
-public record GenerationJob(
+public record GenerationRequest(
         UUID requestId,
         String name,
         String template,
@@ -12,6 +12,7 @@ public record GenerationJob(
         boolean security,
         boolean messaging,
         String deploymentTarget,
+        String status,
         OffsetDateTime createdAt
 ) {
 }

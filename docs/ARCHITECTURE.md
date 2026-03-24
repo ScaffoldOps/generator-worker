@@ -1,119 +1,72 @@
 # Generator Worker Architecture
 
-## Purpose
+## Current scope
 
-`generator-worker` is the asynchronous execution side of the ScaffoldOps generation pipeline. It subscribes to accepted generation requests and drives the internal lifecycle for the job.
+This repository provides the first Kafka-consuming worker iteration for ScaffoldOps generation requests.
 
-This repository currently contains the worker shell, not the final generation engine.
+Included now:
+
+- Spring Boot application bootstrap
+- Hexagonal package layout
+- Explicit Kafka consumer configuration for `generation-requested`
+- Inbound Kafka listener with required-field validation
+- Application service that owns placeholder lifecycle transitions
+- Placeholder lifecycle and project-generation outbound adapters
+- Docker, CI/CD, and Kubernetes deployment baseline
 
 ## Package boundaries
 
-- `com.scaffoldops.generatorworker.domain`
-  - `GenerationRequestedEvent`: inbound Kafka payload model
-  - `GenerationJob`: internal job model used by the application layer
+- `domain`
+  - `GenerationRequestedEvent`: inbound Kafka payload contract
+  - `GenerationRequest`: internal application model
   - `GenerationLifecycleUpdate`: outbound lifecycle update model
-- `com.scaffoldops.generatorworker.application`
-  - `ProcessGenerationJobUseCase`: worker use case contract
-  - `GenerationLifecyclePort`: outbound port for reporting status changes
-  - `ProjectGenerationPort`: outbound port for running generation work
-  - `GenerationWorkerService`: orchestration service
-- `com.scaffoldops.generatorworker.infrastructure`
-  - `KafkaGenerationJobConsumer`: Kafka adapter for inbound events
-  - `KafkaConfiguration`: typed Kafka consumer configuration
+- `application`
+  - `ProcessGenerationRequestUseCase`: inbound use case
+  - `GenerationLifecyclePort`: outbound status-update port
+  - `ProjectGenerationPort`: outbound generation port
+  - `ProcessGenerationRequestService`: lifecycle orchestration service
+- `infrastructure`
+  - `GenerationRequestedKafkaListener`: inbound Kafka adapter
+  - `KafkaConfiguration`: explicit consumer and deserializer wiring
   - `LoggingGenerationLifecycleAdapter`: placeholder lifecycle adapter
   - `NoOpProjectGenerationAdapter`: placeholder generation adapter
 
-Dependency flow is kept one-way:
+Dependency direction remains one-way:
 
 `infrastructure -> application -> domain`
 
 ## Runtime flow
 
-1. `generator-api` publishes a `GenerationRequestedEvent` to the configured Kafka topic.
-2. `KafkaGenerationJobConsumer` receives the event and maps it into a `ProcessGenerationJobUseCase.Command`.
-3. `GenerationWorkerService` constructs a `GenerationJob`.
-4. The worker emits a `GENERATING` lifecycle update through `GenerationLifecyclePort`.
-5. The worker invokes `ProjectGenerationPort.generate(job)`.
-6. If generation completes normally, the worker emits a `GENERATED` update.
-7. If generation throws a runtime exception, the worker emits a `FAILED` update and rethrows the exception.
+1. `generator-api` publishes a JSON event to Kafka topic `generation-requested`.
+2. `GenerationRequestedKafkaListener` consumes the event using consumer group `generator-worker`.
+3. The listener validates required fields before delegating to the application layer.
+4. `ProcessGenerationRequestService` logs processing and emits `RECEIVED`.
+5. The same service emits `GENERATING` and calls `ProjectGenerationPort`.
+6. On success, the service emits `GENERATED`.
+7. On runtime failure, the service emits `FAILED` and rethrows.
 
-## Current adapter implementations
+## Kafka configuration
 
-### Inbound
+Base configuration is defined in `src/main/resources/application.yml`.
 
-`KafkaGenerationJobConsumer` is the only inbound adapter. It listens to:
-
-- Topic property: `app.kafka.topics.generation-requested`
-- Consumer group property: `spring.kafka.consumer.group-id`
-
-Deserialization details:
-
-- Key deserializer: `StringDeserializer`
-- Value deserializer: Spring Kafka `JsonDeserializer`
-- Trusted package: `com.scaffoldops.generatorworker.domain.event`
-- Default value type: `GenerationRequestedEvent`
-- Type headers are disabled
-
-### Outbound
-
-Two outbound adapters are intentionally temporary:
-
-- `LoggingGenerationLifecycleAdapter`
-  - Accepts lifecycle updates and logs them with the configured lifecycle base URL
-  - Does not perform HTTP calls or persistence
-- `NoOpProjectGenerationAdapter`
-  - Logs that generation was invoked
-  - Does not create files, repositories, or deployment assets
-
-## Operational surface
-
-This service is a background worker. It does not expose REST endpoints for generation requests.
-
-The HTTP server exists for operational concerns only:
-
-- `/actuator/health`
-- `/actuator/health/liveness`
-- `/actuator/health/readiness`
-- `/actuator/info`
-
-## Configuration model
-
-Base configuration is defined in [`application.yml`](/home/victor/workspace/ScaffoldOps/generator-worker/src/main/resources/application.yml), with profile-specific overrides in:
-
-- [`application-local.yml`](/home/victor/workspace/ScaffoldOps/generator-worker/src/main/resources/application-local.yml)
-- [`application-dev.yml`](/home/victor/workspace/ScaffoldOps/generator-worker/src/main/resources/application-dev.yml)
-- [`application-pre.yml`](/home/victor/workspace/ScaffoldOps/generator-worker/src/main/resources/application-pre.yml)
-
-Important settings:
+Explicit settings:
 
 - `spring.kafka.bootstrap-servers`
 - `spring.kafka.consumer.group-id`
-- `app.kafka.topics.generation-requested`
-- `app.lifecycle.base-url`
+- `spring.kafka.consumer.auto-offset-reset=earliest`
+- `spring.kafka.consumer.enable-auto-commit=true`
+- `spring.kafka.listener.ack-mode=record`
+- `spring.kafka.listener.concurrency=1`
+- `JsonDeserializer` trusted package `com.scaffoldops.generatorworker.domain.event`
+- `JsonDeserializer` default type `GenerationRequestedEvent`
+- type headers disabled
 
-## Testing status
+`application-dev.yml` points Kafka to `kafka.scaffoldops-dev.svc.cluster.local:9092`.
 
-Current tests verify:
+## Intentional placeholders
 
-- Spring application context startup
-- Success path: `GENERATING -> GENERATED`
-- Failure path: `GENERATING -> FAILED`
-
-Not covered yet:
-
-- Kafka listener integration
-- Serialization compatibility with external publishers
-- Retry and error-handler behavior
-- Real lifecycle delivery
-- Real generation execution
-
-## Intentional gaps
-
-The following capabilities are still pending by design:
-
-- Real scaffold generation implementation
-- Real downstream lifecycle update integration
-- Persistence or job recovery workflow
-- Explicit dead-letter or retry strategy
-- Idempotency protections for duplicate Kafka events
-- Artifact storage and delivery
+- No real scaffold generation engine yet
+- No real generator-api request-state update integration yet
+- No persistence layer or recovery workflow yet
+- No dead-letter, retry, or idempotency design yet
+- No public HTTP controller surface for generation requests
