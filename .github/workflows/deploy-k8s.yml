@@ -42,6 +42,7 @@ jobs:
           kubectl cluster-info
 
           kubectl get namespace "${NAMESPACE}" >/dev/null 2>&1 || kubectl create namespace "${NAMESPACE}"
+          kubectl get secret postgres-credentials -n "${NAMESPACE}" >/dev/null
 
           kubectl apply -n "${NAMESPACE}" -f k8s/deployment/generator-worker-service.yaml
           sed -e "s|image: .*|image: ${IMAGE_NAME}:${IMAGE_VERSION}|" \
