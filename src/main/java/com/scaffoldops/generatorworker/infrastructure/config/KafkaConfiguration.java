@@ -33,11 +33,13 @@ public class KafkaConfiguration {
 
     @Bean
     ConcurrentKafkaListenerContainerFactory<String, GenerationRequestedEvent> generationRequestedKafkaListenerContainerFactory(
-            ConsumerFactory<String, GenerationRequestedEvent> generationRequestedEventConsumerFactory
+            ConsumerFactory<String, GenerationRequestedEvent> generationRequestedEventConsumerFactory,
+            KafkaProperties kafkaProperties
     ) {
         ConcurrentKafkaListenerContainerFactory<String, GenerationRequestedEvent> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(generationRequestedEventConsumerFactory);
+        factory.setAutoStartup(kafkaProperties.getListener().isAutoStartup());
         return factory;
     }
 }
