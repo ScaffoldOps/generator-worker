@@ -17,7 +17,7 @@ class GenerationRequestedKafkaListenerTest {
     void shouldValidateAndDelegateToApplicationService() {
         RecordingUseCase useCase = new RecordingUseCase();
         GenerationRequestedKafkaListener listener =
-                new GenerationRequestedKafkaListener(useCase, new KafkaTopicProperties("generation-requested"));
+                new GenerationRequestedKafkaListener(useCase, new KafkaTopicProperties("generation-requested", "deployment-requested", "generation-requested-dlt"));
 
         GenerationRequestedEvent event = validEvent();
 
@@ -40,7 +40,7 @@ class GenerationRequestedKafkaListenerTest {
     void shouldRejectEventWhenRequiredFieldIsMissing() {
         RecordingUseCase useCase = new RecordingUseCase();
         GenerationRequestedKafkaListener listener =
-                new GenerationRequestedKafkaListener(useCase, new KafkaTopicProperties("generation-requested"));
+                new GenerationRequestedKafkaListener(useCase, new KafkaTopicProperties("generation-requested", "deployment-requested", "generation-requested-dlt"));
 
         GenerationRequestedEvent event = new GenerationRequestedEvent(
                 null,

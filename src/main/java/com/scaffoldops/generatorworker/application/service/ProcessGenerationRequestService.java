@@ -1,8 +1,11 @@
 package com.scaffoldops.generatorworker.application.service;
 
 import com.scaffoldops.generatorworker.application.port.in.ProcessGenerationRequestUseCase;
+import com.scaffoldops.generatorworker.application.port.out.DeploymentRequestedPublisherPort;
 import com.scaffoldops.generatorworker.application.port.out.GenerationLifecyclePort;
 import com.scaffoldops.generatorworker.application.port.out.ProjectGenerationPort;
+import com.scaffoldops.generatorworker.domain.event.DeploymentRequestedEvent;
+import com.scaffoldops.generatorworker.domain.model.GenerationArtifact;
 import com.scaffoldops.generatorworker.domain.model.GenerationLifecycleUpdate;
 import com.scaffoldops.generatorworker.domain.model.GenerationRequest;
 import org.slf4j.Logger;
@@ -16,13 +19,16 @@ public class ProcessGenerationRequestService implements ProcessGenerationRequest
 
     private static final Logger log = LoggerFactory.getLogger(ProcessGenerationRequestService.class);
 
+    private final DeploymentRequestedPublisherPort deploymentRequestedPublisherPort;
     private final GenerationLifecyclePort generationLifecyclePort;
     private final ProjectGenerationPort projectGenerationPort;
 
     public ProcessGenerationRequestService(
+            DeploymentRequestedPublisherPort deploymentRequestedPublisherPort,
             GenerationLifecyclePort generationLifecyclePort,
             ProjectGenerationPort projectGenerationPort
     ) {
+        this.deploymentRequestedPublisherPort = deploymentRequestedPublisherPort;
         this.generationLifecyclePort = generationLifecyclePort;
         this.projectGenerationPort = projectGenerationPort;
     }
@@ -51,16 +57,40 @@ public class ProcessGenerationRequestService implements ProcessGenerationRequest
         );
 
         transition(request, "RECEIVED", "generator-worker received the generation request from Kafka");
-        transition(request, "GENERATING", "generator-worker started placeholder generation processing");
+        transition(request, "GENERATING", "generator-worker started generation processing");
 
+        GenerationArtifact artifact;
         try {
-            // TODO(scaffoldops): replace placeholder ports with real generator-api request-state persistence/API integration.
-            projectGenerationPort.generate(request);
-            transition(request, "GENERATED", "generator-worker completed placeholder generation flow");
+            artifact = projectGenerationPort.generate(request);
         } catch (RuntimeException exception) {
-            transition(request, "FAILED", "generator-worker placeholder flow failed: " + exception.getMessage());
+            transition(request, "FAILED", "generator-worker generation stage failed: " + exception.getMessage());
             log.error(
-                    "Generation request failed requestId={} serviceName={} workerService=generator-worker",
+                    "Generation stage failed requestId={} serviceName={} workerService=generator-worker",
+                    request.requestId(),
+                    request.name(),
+                    exception
+            );
+            throw exception;
+        }
+
+        transition(request, "GENERATED", "generator-worker created durable generation artifact: " + artifact.artifactReference());
+        publishDeploymentRequested(request, artifact);
+    }
+
+    private void publishDeploymentRequested(GenerationRequest request, GenerationArtifact artifact) {
+        try {
+            deploymentRequestedPublisherPort.publish(new DeploymentRequestedEvent(
+                    request.requestId(),
+                    request.name(),
+                    request.deploymentTarget(),
+                    artifact.artifactReference(),
+                    OffsetDateTime.now()
+            ));
+            transition(request, "DEPLOYMENT_REQUESTED", "generator-worker published deployment-requested for artifact: " + artifact.artifactReference());
+        } catch (RuntimeException exception) {
+            transition(request, "FAILED", "generator-worker deployment-request publication failed: " + exception.getMessage());
+            log.error(
+                    "Deployment-request publication failed requestId={} serviceName={} workerService=generator-worker",
                     request.requestId(),
                     request.name(),
                     exception
