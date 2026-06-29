@@ -11,7 +11,7 @@ target/
 .classpath
 .project
 .factorypath
-out/
+/out/
 
 # Logs
 *.log

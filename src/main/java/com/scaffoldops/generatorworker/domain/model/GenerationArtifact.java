@@ -7,6 +7,8 @@ public record GenerationArtifact(
         UUID requestId,
         String artifactType,
         String artifactReference,
+        String serviceName,
+        String imageName,
         OffsetDateTime createdAt
 ) {
 }

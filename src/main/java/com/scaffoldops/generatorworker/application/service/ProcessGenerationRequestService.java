@@ -3,6 +3,7 @@ package com.scaffoldops.generatorworker.application.service;
 import com.scaffoldops.generatorworker.application.port.in.ProcessGenerationRequestUseCase;
 import com.scaffoldops.generatorworker.application.port.out.DeploymentRequestedPublisherPort;
 import com.scaffoldops.generatorworker.application.port.out.GenerationLifecyclePort;
+import com.scaffoldops.generatorworker.application.port.out.ImageBuilderPort;
 import com.scaffoldops.generatorworker.application.port.out.ProjectGenerationPort;
 import com.scaffoldops.generatorworker.domain.event.DeploymentRequestedEvent;
 import com.scaffoldops.generatorworker.domain.model.GenerationArtifact;
@@ -21,15 +22,18 @@ public class ProcessGenerationRequestService implements ProcessGenerationRequest
 
     private final DeploymentRequestedPublisherPort deploymentRequestedPublisherPort;
     private final GenerationLifecyclePort generationLifecyclePort;
+    private final ImageBuilderPort imageBuilderPort;
     private final ProjectGenerationPort projectGenerationPort;
 
     public ProcessGenerationRequestService(
             DeploymentRequestedPublisherPort deploymentRequestedPublisherPort,
             GenerationLifecyclePort generationLifecyclePort,
+            ImageBuilderPort imageBuilderPort,
             ProjectGenerationPort projectGenerationPort
     ) {
         this.deploymentRequestedPublisherPort = deploymentRequestedPublisherPort;
         this.generationLifecyclePort = generationLifecyclePort;
+        this.imageBuilderPort = imageBuilderPort;
         this.projectGenerationPort = projectGenerationPort;
     }
 
@@ -56,14 +60,20 @@ public class ProcessGenerationRequestService implements ProcessGenerationRequest
                 request.deploymentTarget()
         );
 
-        transition(request, "RECEIVED", "generator-worker received the generation request from Kafka");
-        transition(request, "GENERATING", "generator-worker started generation processing");
+        transition(request, "RECEIVED", "generator-worker received the generation request from Kafka", null, null);
+        transition(request, "GENERATING", "generator-worker started generation processing", null, null);
 
         GenerationArtifact artifact;
         try {
             artifact = projectGenerationPort.generate(request);
         } catch (RuntimeException exception) {
-            transition(request, "FAILED", "generator-worker generation stage failed: " + exception.getMessage());
+            transition(
+                    request,
+                    "FAILED",
+                    "generator-worker generation stage failed: " + exception.getMessage(),
+                    null,
+                    null
+            );
             log.error(
                     "Generation stage failed requestId={} serviceName={} workerService=generator-worker",
                     request.requestId(),
@@ -73,8 +83,37 @@ public class ProcessGenerationRequestService implements ProcessGenerationRequest
             throw exception;
         }
 
-        transition(request, "GENERATED", "generator-worker created durable generation artifact: " + artifact.artifactReference());
+        buildImage(request, artifact);
+        transition(
+                request,
+                "GENERATED",
+                "generator-worker generated the project and built the Docker image",
+                artifact.artifactReference(),
+                artifact.imageName()
+        );
         publishDeploymentRequested(request, artifact);
+    }
+
+    private void buildImage(GenerationRequest request, GenerationArtifact artifact) {
+        try {
+            imageBuilderPort.build(artifact);
+        } catch (RuntimeException exception) {
+            transition(
+                    request,
+                    "FAILED",
+                    "generator-worker image build stage failed: " + exception.getMessage(),
+                    artifact.artifactReference(),
+                    null
+            );
+            log.error(
+                    "Image build stage failed requestId={} serviceName={} imageName={} workerService=generator-worker",
+                    request.requestId(),
+                    request.name(),
+                    artifact.imageName(),
+                    exception
+            );
+            throw exception;
+        }
     }
 
     private void publishDeploymentRequested(GenerationRequest request, GenerationArtifact artifact) {
@@ -86,9 +125,14 @@ public class ProcessGenerationRequestService implements ProcessGenerationRequest
                     artifact.artifactReference(),
                     OffsetDateTime.now()
             ));
-            transition(request, "DEPLOYMENT_REQUESTED", "generator-worker published deployment-requested for artifact: " + artifact.artifactReference());
+            transition(
+                    request,
+                    "DEPLOYMENT_REQUESTED",
+                    "generator-worker published deployment-requested for artifact: " + artifact.artifactReference(),
+                    artifact.artifactReference(),
+                    artifact.imageName()
+            );
         } catch (RuntimeException exception) {
-            transition(request, "FAILED", "generator-worker deployment-request publication failed: " + exception.getMessage());
             log.error(
                     "Deployment-request publication failed requestId={} serviceName={} workerService=generator-worker",
                     request.requestId(),
@@ -99,12 +143,19 @@ public class ProcessGenerationRequestService implements ProcessGenerationRequest
         }
     }
 
-    private void transition(GenerationRequest request, String status, String detail) {
+    private void transition(
+            GenerationRequest request,
+            String status,
+            String message,
+            String artifactRef,
+            String imageRef
+    ) {
         generationLifecyclePort.updateStatus(new GenerationLifecycleUpdate(
                 request.requestId(),
                 status,
-                detail,
-                OffsetDateTime.now()
+                message,
+                artifactRef,
+                imageRef
         ));
     }
 }

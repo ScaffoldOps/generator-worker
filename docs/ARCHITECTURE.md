@@ -11,7 +11,8 @@ Included now:
 - Explicit Kafka consumer configuration for `generation-requested`
 - Inbound Kafka listener with required-field validation
 - Application service that orchestrates generation-stage lifecycle transitions
-- Manifest-writing generation adapter that produces a durable handoff reference
+- Project generation adapter that produces a Spring Boot Hello World service and durable handoff reference
+- Docker image builder that tags the generated service locally without publishing it
 - Outbound Kafka publication for `deployment-requested`
 - Optional HTTP-backed lifecycle adapter for `generator-api`
 - Local requestId-based idempotency for manifest reuse and deployment-request publication
@@ -29,6 +30,7 @@ Included now:
   - `ProcessGenerationRequestUseCase`: inbound use case
   - `GenerationLifecyclePort`: outbound status-update port
   - `ProjectGenerationPort`: outbound generation port
+  - `ImageBuilderPort`: outbound local image-build port
   - `DeploymentRequestedPublisherPort`: outbound deployment-event port
   - `ProcessGenerationRequestService`: lifecycle orchestration service
 - `infrastructure`
@@ -36,6 +38,7 @@ Included now:
   - `KafkaConfiguration`: explicit consumer and deserializer wiring
   - `GeneratorApiGenerationLifecycleAdapter`: optional generator-api lifecycle adapter
   - `ManifestWritingProjectGenerationAdapter`: deterministic manifest writer
+  - `DockerImageBuilderAdapter`: local `docker build` adapter
   - `DeploymentRequestedKafkaPublisher`: outbound Kafka deployment-event adapter
 
 Dependency direction remains one-way:
@@ -48,11 +51,12 @@ Dependency direction remains one-way:
 2. `GenerationRequestedKafkaListener` consumes the event using consumer group `generator-worker`.
 3. The listener validates required fields before delegating to the application layer.
 4. `ProcessGenerationRequestService` emits `RECEIVED` and `GENERATING` through `GenerationLifecyclePort`.
-5. The same service calls `ProjectGenerationPort`, which writes a deterministic manifest file keyed by `requestId`.
+5. The same service calls `ProjectGenerationPort`, which writes a deterministic Spring Boot project keyed by `requestId`.
 6. On success, the service emits `GENERATED` with the durable artifact reference.
-7. The service publishes `DeploymentRequestedEvent` to Kafka topic `deployment-requested`.
-8. After successful publication, the service emits `DEPLOYMENT_REQUESTED`.
-9. On runtime failure, the service emits `FAILED` and rethrows.
+7. The service runs `docker build --tag scaffoldops/<serviceName>:<requestId> <projectDirectory>`.
+8. The service publishes `DeploymentRequestedEvent` to Kafka topic `deployment-requested`.
+9. After successful publication, the service emits `DEPLOYMENT_REQUESTED`.
+10. On generation, image-build, or publication failure, the service emits `FAILED` and rethrows.
 
 ## Kafka configuration
 
@@ -76,9 +80,10 @@ Explicit settings:
 
 ## Producer-side durability and idempotency
 
-- Manifests are written to `app.generation.manifest-output-dir`
-- Manifest filenames are deterministic: `manifest-<requestId>.json`
-- Existing manifests are reused for repeat processing of the same `requestId`
+- Projects are written to `app.generation.manifest-output-dir`
+- Project directories are deterministic: `<serviceName>-<requestId>`
+- A `generation-manifest.json` file records the resolved service, package, image, and request variables
+- Existing completed projects are reused for repeat processing of the same `requestId`
 - Successful `deployment-requested` publications create a local marker file under `app.generation.handoff-state-dir`
 - Existing marker files suppress duplicate `deployment-requested` publication on the same worker filesystem
 
@@ -87,15 +92,25 @@ These safeguards are local to the worker filesystem. They improve single-node or
 ## Lifecycle integration
 
 - `GenerationLifecyclePort` remains the only lifecycle update path from the application layer
-- `GeneratorApiGenerationLifecycleAdapter` can POST status updates to `generator-api` when `app.lifecycle.http-enabled=true`
+- `GeneratorApiGenerationLifecycleAdapter` can PATCH status updates to `generator-api` when `app.lifecycle.http-enabled=true`
+- The `local` profile enables HTTP callbacks by default; `dev` and `pre` require explicit enablement
+- Callback configuration is supplied through `GENERATOR_API_BASE_URL`, `GENERATOR_API_LIFECYCLE_HTTP_ENABLED`, `GENERATOR_API_LIFECYCLE_STATUS_UPDATE_PATH`, and `GENERATOR_API_BEARER_TOKEN`
+- HTTP contract tests validate `GENERATING`, `GENERATED`, and `FAILED` payloads
+- `RECEIVED` and `DEPLOYMENT_REQUESTED` remain worker-local transitions and are not sent to `generator-api`
 - When HTTP lifecycle updates are disabled, the adapter logs the transition instead
 
-This preserves `generator-api` as the intended lifecycle system of record without blocking worker progress on a missing callback rollout.
+The callback uses `PATCH {baseUrl}{statusUpdatePath}` with `status`, `message`,
+`artifactRef`, and `imageRef` in the JSON body. The request id is supplied only
+as a path variable. A configured bearer token is added to the Authorization
+header.
+
+`GENERATED` is emitted only after project generation and Docker image build
+both succeed. Generation or image build failures emit `FAILED`.
 
 ## Remaining gaps
 
-- Manifest output is a minimal durable handoff artifact, not a full scaffold package
+- Generated output is intentionally limited to a minimal Hello World Spring Boot service
 - Cross-instance idempotency is not solved yet
 - No dead-letter topic or outbox/reconciliation workflow yet
-- `generator-api` lifecycle callback contract is not finalized in this repository
+- Service-account token acquisition is still external configuration
 - No public HTTP controller surface for generation requests
