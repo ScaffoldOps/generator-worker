@@ -44,12 +44,11 @@ jobs:
           kubectl cluster-info
 
           kubectl get namespace "${NAMESPACE}" >/dev/null 2>&1 || kubectl create namespace "${NAMESPACE}"
-          kubectl get secret postgres-credentials -n "${NAMESPACE}" >/dev/null
 
-          kubectl apply -n "${NAMESPACE}" -f k8s/deployment/generator-worker-service.yaml
-          sed -e "s|image: .*|image: ${IMAGE_NAME}:${IMAGE_VERSION}|" \
-              -e "s|value: \"dev\"|value: \"${SPRING_PROFILE}\"|" \
-              k8s/deployment/generator-worker-deployment.yaml \
-            | kubectl apply -n "${NAMESPACE}" -f -
-          kubectl rollout status deployment/generator-worker-deployment -n "${NAMESPACE}" --timeout=300s
+          kubectl apply -k k8s/deployment
+          kubectl set image deployment/generator-worker \
+            generator-worker="${IMAGE_NAME}:${IMAGE_VERSION}" \
+            -n "${NAMESPACE}"
+          kubectl rollout restart deployment/generator-worker -n "${NAMESPACE}"
+          kubectl rollout status deployment/generator-worker -n "${NAMESPACE}" --timeout=300s
           kubectl wait --for=condition=ready pod -l app=generator-worker -n "${NAMESPACE}" --timeout=300s

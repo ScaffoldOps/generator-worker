@@ -1,7 +1,8 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: generator-worker-deployment
+  name: generator-worker
+  namespace: scaffoldops-dev
 spec:
   replicas: 1
   selector:
@@ -17,7 +18,7 @@ spec:
           emptyDir: {}
       containers:
         - name: generator-worker
-          image: victodomvar/scaffoldops-generator-worker:develop
+          image: victodomvar/scaffoldops-generator-worker:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
@@ -27,16 +28,30 @@ spec:
           env:
             - name: SPRING_PROFILES_ACTIVE
               value: "dev"
+            - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka:9092"
             - name: KAFKA_CONSUMER_GROUP
               value: "generator-worker"
+            - name: GENERATION_REQUESTED_TOPIC
+              value: "generation-requested"
             - name: GENERATOR_API_BASE_URL
-              value: "http://generator-api-service/api/generator/v1"
+              value: "http://generator-api:8081/api/generator/v1"
             - name: GENERATOR_API_LIFECYCLE_HTTP_ENABLED
-              value: "false"
+              value: "true"
+            - name: GENERATOR_API_BEARER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: generator-api-worker-token
+                  key: token
+                  optional: true
             - name: GENERATION_MANIFEST_OUTPUT_DIR
               value: "/var/lib/generator-worker/manifests"
             - name: GENERATION_HANDOFF_STATE_DIR
               value: "/var/lib/generator-worker/handoff"
+            - name: DOCKER_COMMAND
+              value: "docker"
+            - name: GENERATOR_DOCKER_BUILD_ENABLED
+              value: "false"
           readinessProbe:
             tcpSocket:
               port: 8080
