@@ -1,11 +1,18 @@
 package com.scaffoldops.generatorworker.infrastructure.config;
 
+import com.scaffoldops.generatorworker.domain.event.DeploymentRequestedEvent;
 import com.scaffoldops.generatorworker.domain.event.GenerationRequestedEvent;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.producer.ProducerConfig;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.kafka.core.ConsumerFactory;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.core.ProducerFactory;
+import org.springframework.kafka.listener.CommonErrorHandler;
+import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.support.serializer.JsonDeserializer;
+import org.springframework.kafka.support.serializer.JsonSerializer;
 
 import java.util.Map;
 
@@ -37,5 +44,57 @@ class KafkaConfigurationTest {
         assertThat(properties.get(JsonDeserializer.VALUE_DEFAULT_TYPE))
                 .isEqualTo(GenerationRequestedEvent.class.getName());
         assertThat(properties.get(JsonDeserializer.USE_TYPE_INFO_HEADERS)).isEqualTo(false);
+    }
+
+    @Test
+    void shouldCreateCommonErrorHandlerForGenerationConsumer() {
+        KafkaProperties kafkaProperties = new KafkaProperties();
+        ProducerFactory<String, Object> producerFactory =
+                kafkaConfiguration.generationRequestedDeadLetterProducerFactory(kafkaProperties);
+        KafkaTemplate<String, Object> kafkaTemplate =
+                kafkaConfiguration.generationRequestedDeadLetterKafkaTemplate(producerFactory);
+        DeadLetterPublishingRecoverer recoverer =
+                kafkaConfiguration.generationRequestedDeadLetterPublishingRecoverer(
+                        kafkaTemplate,
+                        new KafkaTopicProperties("generation-requested", "deployment-requested", "generation-requested-dlt")
+                );
+        CommonErrorHandler errorHandler = kafkaConfiguration.generationRequestedKafkaErrorHandler(recoverer);
+
+        assertThat(errorHandler).isNotNull();
+    }
+
+    @Test
+    void shouldCreateDeadLetterRecovererForGenerationRequestedTopic() {
+        KafkaProperties kafkaProperties = new KafkaProperties();
+        ProducerFactory<String, Object> producerFactory =
+                kafkaConfiguration.generationRequestedDeadLetterProducerFactory(kafkaProperties);
+        KafkaTemplate<String, Object> kafkaTemplate =
+                kafkaConfiguration.generationRequestedDeadLetterKafkaTemplate(producerFactory);
+        DeadLetterPublishingRecoverer recoverer = kafkaConfiguration.generationRequestedDeadLetterPublishingRecoverer(
+                kafkaTemplate,
+                new KafkaTopicProperties("generation-requested", "deployment-requested", "generation-requested-dlt")
+        );
+
+        assertThat(recoverer).isNotNull();
+    }
+
+    @Test
+    void shouldBuildProducerFactoryWithExplicitJsonSerializationSettings() {
+        KafkaProperties kafkaProperties = new KafkaProperties();
+        kafkaProperties.setBootstrapServers(java.util.List.of("kafka.scaffoldops-dev.svc.cluster.local:9092"));
+
+        ProducerFactory<String, DeploymentRequestedEvent> producerFactory =
+                kafkaConfiguration.deploymentRequestedEventProducerFactory(kafkaProperties);
+
+        Map<String, Object> properties = producerFactory.getConfigurationProperties();
+
+        assertThat(properties.get(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG))
+                .asList()
+                .contains("kafka.scaffoldops-dev.svc.cluster.local:9092");
+        assertThat(properties.get(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG))
+                .isEqualTo(org.apache.kafka.common.serialization.StringSerializer.class);
+        assertThat(properties.get(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG))
+                .isEqualTo(JsonSerializer.class);
+        assertThat(properties.get(JsonSerializer.ADD_TYPE_INFO_HEADERS)).isEqualTo(false);
     }
 }

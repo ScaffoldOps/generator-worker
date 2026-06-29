@@ -3,5 +3,10 @@ spring:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka.scaffoldops-pre.svc.cluster.local:9092}
 
 app:
+  generation:
+    manifest-output-dir: ${GENERATION_MANIFEST_OUTPUT_DIR:/var/lib/generator-worker/manifests}
+    handoff-state-dir: ${GENERATION_HANDOFF_STATE_DIR:/var/lib/generator-worker/handoff}
   lifecycle:
-    base-url: ${GENERATOR_API_BASE_URL:http://generator-api-service.scaffoldops-pre.svc.cluster.local}
+    base-url: ${GENERATOR_API_BASE_URL:http://generator-api-service.scaffoldops-pre.svc.cluster.local/api/generator/v1}
+    http-enabled: ${GENERATOR_API_LIFECYCLE_HTTP_ENABLED:false}
+    status-update-path: ${GENERATOR_API_LIFECYCLE_STATUS_UPDATE_PATH:/internal/generation-requests/{requestId}/status}

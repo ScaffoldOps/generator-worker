@@ -12,19 +12,31 @@ spec:
       labels:
         app: generator-worker
     spec:
+      volumes:
+        - name: generator-worker-data
+          emptyDir: {}
       containers:
         - name: generator-worker
           image: victodomvar/scaffoldops-generator-worker:develop
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
+          volumeMounts:
+            - name: generator-worker-data
+              mountPath: /var/lib/generator-worker
           env:
             - name: SPRING_PROFILES_ACTIVE
               value: "dev"
             - name: KAFKA_CONSUMER_GROUP
               value: "generator-worker"
             - name: GENERATOR_API_BASE_URL
-              value: "http://generator-api-service"
+              value: "http://generator-api-service/api/generator/v1"
+            - name: GENERATOR_API_LIFECYCLE_HTTP_ENABLED
+              value: "false"
+            - name: GENERATION_MANIFEST_OUTPUT_DIR
+              value: "/var/lib/generator-worker/manifests"
+            - name: GENERATION_HANDOFF_STATE_DIR
+              value: "/var/lib/generator-worker/handoff"
           readinessProbe:
             tcpSocket:
               port: 8080

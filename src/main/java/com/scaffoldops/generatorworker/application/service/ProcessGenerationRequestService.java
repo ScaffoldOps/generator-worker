@@ -1,8 +1,12 @@
 package com.scaffoldops.generatorworker.application.service;
 
 import com.scaffoldops.generatorworker.application.port.in.ProcessGenerationRequestUseCase;
+import com.scaffoldops.generatorworker.application.port.out.DeploymentRequestedPublisherPort;
 import com.scaffoldops.generatorworker.application.port.out.GenerationLifecyclePort;
+import com.scaffoldops.generatorworker.application.port.out.ImageBuilderPort;
 import com.scaffoldops.generatorworker.application.port.out.ProjectGenerationPort;
+import com.scaffoldops.generatorworker.domain.event.DeploymentRequestedEvent;
+import com.scaffoldops.generatorworker.domain.model.GenerationArtifact;
 import com.scaffoldops.generatorworker.domain.model.GenerationLifecycleUpdate;
 import com.scaffoldops.generatorworker.domain.model.GenerationRequest;
 import org.slf4j.Logger;
@@ -16,14 +20,20 @@ public class ProcessGenerationRequestService implements ProcessGenerationRequest
 
     private static final Logger log = LoggerFactory.getLogger(ProcessGenerationRequestService.class);
 
+    private final DeploymentRequestedPublisherPort deploymentRequestedPublisherPort;
     private final GenerationLifecyclePort generationLifecyclePort;
+    private final ImageBuilderPort imageBuilderPort;
     private final ProjectGenerationPort projectGenerationPort;
 
     public ProcessGenerationRequestService(
+            DeploymentRequestedPublisherPort deploymentRequestedPublisherPort,
             GenerationLifecyclePort generationLifecyclePort,
+            ImageBuilderPort imageBuilderPort,
             ProjectGenerationPort projectGenerationPort
     ) {
+        this.deploymentRequestedPublisherPort = deploymentRequestedPublisherPort;
         this.generationLifecyclePort = generationLifecyclePort;
+        this.imageBuilderPort = imageBuilderPort;
         this.projectGenerationPort = projectGenerationPort;
     }
 
@@ -50,17 +60,81 @@ public class ProcessGenerationRequestService implements ProcessGenerationRequest
                 request.deploymentTarget()
         );
 
-        transition(request, "RECEIVED", "generator-worker received the generation request from Kafka");
-        transition(request, "GENERATING", "generator-worker started placeholder generation processing");
+        transition(request, "RECEIVED", "generator-worker received the generation request from Kafka", null, null);
+        transition(request, "GENERATING", "generator-worker started generation processing", null, null);
 
+        GenerationArtifact artifact;
         try {
-            // TODO(scaffoldops): replace placeholder ports with real generator-api request-state persistence/API integration.
-            projectGenerationPort.generate(request);
-            transition(request, "GENERATED", "generator-worker completed placeholder generation flow");
+            artifact = projectGenerationPort.generate(request);
         } catch (RuntimeException exception) {
-            transition(request, "FAILED", "generator-worker placeholder flow failed: " + exception.getMessage());
+            transition(
+                    request,
+                    "FAILED",
+                    "generator-worker generation stage failed: " + exception.getMessage(),
+                    null,
+                    null
+            );
             log.error(
-                    "Generation request failed requestId={} serviceName={} workerService=generator-worker",
+                    "Generation stage failed requestId={} serviceName={} workerService=generator-worker",
+                    request.requestId(),
+                    request.name(),
+                    exception
+            );
+            throw exception;
+        }
+
+        buildImage(request, artifact);
+        transition(
+                request,
+                "GENERATED",
+                "generator-worker generated the project and built the Docker image",
+                artifact.artifactReference(),
+                artifact.imageName()
+        );
+        publishDeploymentRequested(request, artifact);
+    }
+
+    private void buildImage(GenerationRequest request, GenerationArtifact artifact) {
+        try {
+            imageBuilderPort.build(artifact);
+        } catch (RuntimeException exception) {
+            transition(
+                    request,
+                    "FAILED",
+                    "generator-worker image build stage failed: " + exception.getMessage(),
+                    artifact.artifactReference(),
+                    null
+            );
+            log.error(
+                    "Image build stage failed requestId={} serviceName={} imageName={} workerService=generator-worker",
+                    request.requestId(),
+                    request.name(),
+                    artifact.imageName(),
+                    exception
+            );
+            throw exception;
+        }
+    }
+
+    private void publishDeploymentRequested(GenerationRequest request, GenerationArtifact artifact) {
+        try {
+            deploymentRequestedPublisherPort.publish(new DeploymentRequestedEvent(
+                    request.requestId(),
+                    request.name(),
+                    request.deploymentTarget(),
+                    artifact.artifactReference(),
+                    OffsetDateTime.now()
+            ));
+            transition(
+                    request,
+                    "DEPLOYMENT_REQUESTED",
+                    "generator-worker published deployment-requested for artifact: " + artifact.artifactReference(),
+                    artifact.artifactReference(),
+                    artifact.imageName()
+            );
+        } catch (RuntimeException exception) {
+            log.error(
+                    "Deployment-request publication failed requestId={} serviceName={} workerService=generator-worker",
                     request.requestId(),
                     request.name(),
                     exception
@@ -69,12 +143,19 @@ public class ProcessGenerationRequestService implements ProcessGenerationRequest
         }
     }
 
-    private void transition(GenerationRequest request, String status, String detail) {
+    private void transition(
+            GenerationRequest request,
+            String status,
+            String message,
+            String artifactRef,
+            String imageRef
+    ) {
         generationLifecyclePort.updateStatus(new GenerationLifecycleUpdate(
                 request.requestId(),
                 status,
-                detail,
-                OffsetDateTime.now()
+                message,
+                artifactRef,
+                imageRef
         ));
     }
 }

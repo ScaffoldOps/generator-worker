@@ -9,7 +9,7 @@ spring:
     consumer:
       group-id: ${KAFKA_CONSUMER_GROUP:generator-worker}
       auto-offset-reset: earliest
-      enable-auto-commit: true
+      enable-auto-commit: false
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
     listener:
@@ -24,11 +24,21 @@ info:
     version: 0.0.1-SNAPSHOT
 
 app:
+  image-builder:
+    docker-command: ${DOCKER_COMMAND:docker}
+  generation:
+    manifest-output-dir: ${GENERATION_MANIFEST_OUTPUT_DIR:${java.io.tmpdir}/generator-worker/manifests}
+    handoff-state-dir: ${GENERATION_HANDOFF_STATE_DIR:${java.io.tmpdir}/generator-worker/handoff}
   kafka:
     topics:
       generation-requested: ${GENERATION_REQUESTED_TOPIC:generation-requested}
+      deployment-requested: ${DEPLOYMENT_REQUESTED_TOPIC:deployment-requested}
+      generation-requested-dlt: ${GENERATION_REQUESTED_DLT_TOPIC:generation-requested-dlt}
   lifecycle:
-    base-url: ${GENERATOR_API_BASE_URL:http://generator-api-service}
+    base-url: ${GENERATOR_API_BASE_URL:http://generator-api-service/api/generator/v1}
+    http-enabled: ${GENERATOR_API_LIFECYCLE_HTTP_ENABLED:false}
+    status-update-path: ${GENERATOR_API_LIFECYCLE_STATUS_UPDATE_PATH:/internal/generation-requests/{requestId}/status}
+    bearer-token: ${GENERATOR_API_BEARER_TOKEN:}
 
 management:
   health:
