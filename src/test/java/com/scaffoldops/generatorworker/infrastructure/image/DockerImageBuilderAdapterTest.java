@@ -24,7 +24,7 @@ class DockerImageBuilderAdapterTest {
         Path dockerCommand = executableScript(
                 "printf '%s\\n' \"$@\" > \"" + argumentsFile + "\"\nexit 0"
         );
-        DockerImageBuilderAdapter adapter = new DockerImageBuilderAdapter(dockerCommand.toString());
+        DockerImageBuilderAdapter adapter = new DockerImageBuilderAdapter(true, dockerCommand.toString());
 
         adapter.build(artifact(projectDirectory));
 
@@ -40,13 +40,27 @@ class DockerImageBuilderAdapterTest {
     void shouldFailWhenDockerBuildReturnsNonZeroExitCode() throws Exception {
         Path projectDirectory = generatedProject();
         Path dockerCommand = executableScript("echo 'daemon unavailable'\nexit 17");
-        DockerImageBuilderAdapter adapter = new DockerImageBuilderAdapter(dockerCommand.toString());
+        DockerImageBuilderAdapter adapter = new DockerImageBuilderAdapter(true, dockerCommand.toString());
 
         assertThatThrownBy(() -> adapter.build(artifact(projectDirectory)))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("docker build failed")
                 .hasMessageContaining("exitCode=17")
                 .hasMessageContaining("daemon unavailable");
+    }
+
+    @Test
+    void shouldSkipDockerBuildWhenDisabled() throws Exception {
+        Path projectDirectory = generatedProject();
+        Path argumentsFile = tempDir.resolve("docker-arguments-disabled.txt");
+        Path dockerCommand = executableScript(
+                "printf '%s\\n' \"$@\" > \"" + argumentsFile + "\"\nexit 0"
+        );
+        DockerImageBuilderAdapter adapter = new DockerImageBuilderAdapter(false, dockerCommand.toString());
+
+        adapter.build(artifact(projectDirectory));
+
+        assertThat(argumentsFile).doesNotExist();
     }
 
     private Path generatedProject() throws Exception {

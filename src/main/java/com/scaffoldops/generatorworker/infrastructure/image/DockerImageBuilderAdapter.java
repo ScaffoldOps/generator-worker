@@ -18,17 +18,30 @@ public class DockerImageBuilderAdapter implements ImageBuilderPort {
 
     private static final Logger log = LoggerFactory.getLogger(DockerImageBuilderAdapter.class);
 
+    private final boolean buildEnabled;
     private final String dockerCommand;
 
     public DockerImageBuilderAdapter(
+            @Value("${app.image-builder.build-enabled:true}") boolean buildEnabled,
             @Value("${app.image-builder.docker-command:docker}") String dockerCommand
     ) {
+        this.buildEnabled = buildEnabled;
         this.dockerCommand = dockerCommand;
     }
 
     @Override
     public void build(GenerationArtifact artifact) {
         Path projectDirectory = projectDirectory(artifact);
+        if (!buildEnabled) {
+            log.info(
+                    "Skipping generated Docker image build because image builder is disabled requestId={} imageName={} projectDirectory={} workerService=generator-worker",
+                    artifact.requestId(),
+                    artifact.imageName(),
+                    projectDirectory
+            );
+            return;
+        }
+
         List<String> command = List.of(
                 dockerCommand,
                 "build",

@@ -179,18 +179,69 @@ SPRING_PROFILES_ACTIVE=local ./mvnw spring-boot:run
 
 ```bash
 ./mvnw clean package -DskipTests
-docker build -f Dockerfile -t scaffoldops/generator-worker:latest .
+docker build -f Dockerfile -t victodomvar/scaffoldops-generator-worker:latest .
+```
+
+## CI/CD
+
+GitHub Actions workflows live under `.github/workflows`:
+
+- `Generator Worker Develop Pipeline` runs on pushes to `develop`.
+- `Generator Worker Main Pipeline` runs on pushes to `main`.
+- `Generator Worker PR Checks` runs for pull requests and feature branches.
+- `Deploy generator-worker to Kubernetes` is the reusable Minikube deployment workflow.
+
+The develop and main pipelines:
+
+1. run `./mvnw --batch-mode --no-transfer-progress clean test`;
+2. package the worker jar;
+3. build Docker image `victodomvar/scaffoldops-generator-worker`;
+4. push both tags to Docker Hub:
+   - `victodomvar/scaffoldops-generator-worker:latest`
+   - `victodomvar/scaffoldops-generator-worker:<commit-sha>`
+5. deploy to Minikube namespace `scaffoldops-dev`.
+
+Required GitHub secrets:
+
+- `DOCKER_USERNAME`
+- `DOCKER_PASSWORD`
+
+The self-hosted runner must have Docker available and `kubectl` access to the
+local Minikube context named `minikube`.
+
+Manual deployment after an image is available:
+
+```bash
+kubectl apply -k k8s/deployment
+kubectl rollout restart deployment/generator-worker -n scaffoldops-dev
+kubectl rollout status deployment/generator-worker -n scaffoldops-dev --timeout=300s
+```
+
+Verify the pod and logs:
+
+```bash
+kubectl -n scaffoldops-dev get deploy,pod,svc -l app=generator-worker
+kubectl -n scaffoldops-dev logs deploy/generator-worker -f
 ```
 
 ## Kubernetes
 
 Deployment assets live under `k8s/deployment`.
 
+For the current Minikube MVP walkthrough, including the Docker-in-pod
+limitation and the recommended local-worker E2E path, see
+[docs/minikube-e2e-demo.md](docs/minikube-e2e-demo.md).
+
 The deployment mounts `/var/lib/generator-worker` for manifest and handoff marker files and exposes env vars for:
 
+- `SPRING_KAFKA_BOOTSTRAP_SERVERS`
+- `GENERATION_REQUESTED_TOPIC`
+- `GENERATOR_API_BASE_URL`
+- `GENERATOR_API_LIFECYCLE_HTTP_ENABLED`
+- `GENERATOR_API_BEARER_TOKEN`
 - `GENERATION_MANIFEST_OUTPUT_DIR`
 - `GENERATION_HANDOFF_STATE_DIR`
-- `GENERATOR_API_LIFECYCLE_HTTP_ENABLED`
+- `GENERATOR_DOCKER_BUILD_ENABLED`
 
 ## Notes
 

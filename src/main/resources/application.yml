@@ -25,6 +25,7 @@ info:
 
 app:
   image-builder:
+    build-enabled: ${GENERATOR_DOCKER_BUILD_ENABLED:true}
     docker-command: ${DOCKER_COMMAND:docker}
   generation:
     manifest-output-dir: ${GENERATION_MANIFEST_OUTPUT_DIR:${java.io.tmpdir}/generator-worker/manifests}

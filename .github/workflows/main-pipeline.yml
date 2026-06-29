@@ -58,8 +58,8 @@ jobs:
           java-version: '17'
           cache: maven
 
-      - name: Maven clean verify
-        run: ./mvnw --batch-mode --no-transfer-progress clean verify
+      - name: Maven clean test
+        run: ./mvnw --batch-mode --no-transfer-progress clean test
 
   docker_build:
     name: Docker Build
@@ -68,8 +68,8 @@ jobs:
       - code_quality
       - tests
     outputs:
-      immutable_tag: ${{ steps.image_metadata.outputs.immutable_tag }}
-      branch_tag: ${{ steps.image_metadata.outputs.branch_tag }}
+      commit_sha: ${{ steps.image_metadata.outputs.commit_sha }}
+      latest_tag: ${{ steps.image_metadata.outputs.latest_tag }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -98,11 +98,9 @@ jobs:
         id: image_metadata
         run: |
           set -euo pipefail
-          APP_VERSION="$(./mvnw -q -DforceStdout help:evaluate -Dexpression=project.version)"
-          SHORT_SHA="$(git rev-parse --short HEAD)"
 
-          echo "immutable_tag=${APP_VERSION}-${SHORT_SHA}" >> "${GITHUB_OUTPUT}"
-          echo "branch_tag=main" >> "${GITHUB_OUTPUT}"
+          echo "commit_sha=${GITHUB_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "latest_tag=latest" >> "${GITHUB_OUTPUT}"
 
       - name: Build Docker image
         uses: docker/build-push-action@v6
@@ -111,7 +109,8 @@ jobs:
           file: ./Dockerfile
           push: false
           tags: |
-            victodomvar/scaffoldops-generator-worker:${{ steps.image_metadata.outputs.immutable_tag }}
+            victodomvar/scaffoldops-generator-worker:${{ steps.image_metadata.outputs.latest_tag }}
+            victodomvar/scaffoldops-generator-worker:${{ steps.image_metadata.outputs.commit_sha }}
 
   docker_push:
     name: Docker Push
@@ -155,17 +154,17 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: |
-            victodomvar/scaffoldops-generator-worker:${{ needs.docker_build.outputs.immutable_tag }}
-            victodomvar/scaffoldops-generator-worker:${{ needs.docker_build.outputs.branch_tag }}
+            victodomvar/scaffoldops-generator-worker:${{ needs.docker_build.outputs.latest_tag }}
+            victodomvar/scaffoldops-generator-worker:${{ needs.docker_build.outputs.commit_sha }}
 
   deploy:
-    name: Deploy to PRE
+    name: Deploy to DEV
     needs:
       - docker_build
       - docker_push
     uses: ./.github/workflows/deploy-k8s.yml
     with:
-      namespace: scaffoldops-pre
-      environment_name: PRE
-      spring_profile: pre
-      image_version: ${{ needs.docker_build.outputs.immutable_tag }}
+      namespace: scaffoldops-dev
+      environment_name: DEV
+      spring_profile: dev
+      image_version: latest
