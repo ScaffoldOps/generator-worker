@@ -43,7 +43,6 @@ spec:
                 secretKeyRef:
                   name: generator-api-worker-token
                   key: token
-                  optional: true
             - name: GENERATION_MANIFEST_OUTPUT_DIR
               value: "/var/lib/generator-worker/manifests"
             - name: GENERATION_HANDOFF_STATE_DIR

@@ -62,6 +62,7 @@ public class GeneratorApiGenerationLifecycleAdapter implements GenerationLifecyc
 
     @Override
     public void updateStatus(GenerationLifecycleUpdate update) {
+        String targetUrl = lifecycleBaseUrl + lifecycleStatusUpdatePath;
         if (!HTTP_CALLBACK_STATUSES.contains(update.status())) {
             log.debug(
                     "Skipping lifecycle HTTP callback requestId={} status={} workerService=generator-worker",
@@ -84,7 +85,7 @@ public class GeneratorApiGenerationLifecycleAdapter implements GenerationLifecyc
 
         try {
             restTemplate.exchange(
-                    lifecycleBaseUrl + lifecycleStatusUpdatePath,
+                    targetUrl,
                     HttpMethod.PATCH,
                     new HttpEntity<>(payload(update), headers()),
                     Void.class,
@@ -97,6 +98,14 @@ public class GeneratorApiGenerationLifecycleAdapter implements GenerationLifecyc
                     lifecycleBaseUrl
             );
         } catch (RestClientException exception) {
+            log.error(
+                    "Generator-api lifecycle callback failed requestId={} status={} targetUrl={} bearerTokenConfigured={} workerService=generator-worker",
+                    update.requestId(),
+                    update.status(),
+                    targetUrl,
+                    StringUtils.hasText(lifecycleBearerToken),
+                    exception
+            );
             throw new IllegalStateException("generator-api lifecycle update failed for requestId=" + update.requestId(), exception);
         }
     }

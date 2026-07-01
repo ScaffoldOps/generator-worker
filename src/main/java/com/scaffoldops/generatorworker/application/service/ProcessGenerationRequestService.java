@@ -52,6 +52,22 @@ public class ProcessGenerationRequestService implements ProcessGenerationRequest
                 command.createdAt()
         );
 
+        try {
+            process(request);
+        } catch (RuntimeException exception) {
+            log.error(
+                    "Generation request processing failed requestId={} serviceName={} template={} deploymentTarget={} workerService=generator-worker",
+                    request.requestId(),
+                    request.name(),
+                    request.template(),
+                    request.deploymentTarget(),
+                    exception
+            );
+            throw exception;
+        }
+    }
+
+    private void process(GenerationRequest request) {
         log.info(
                 "Processing generation request requestId={} serviceName={} template={} deploymentTarget={} workerService=generator-worker",
                 request.requestId(),
@@ -83,20 +99,23 @@ public class ProcessGenerationRequestService implements ProcessGenerationRequest
             throw exception;
         }
 
-        buildImage(request, artifact);
+        String imageRef = buildImage(request, artifact);
+        String generatedMessage = imageRef == null
+                ? "generator-worker generated the project and skipped Docker image build"
+                : "generator-worker generated the project and built the Docker image";
         transition(
                 request,
                 "GENERATED",
-                "generator-worker generated the project and built the Docker image",
+                generatedMessage,
                 artifact.artifactReference(),
-                artifact.imageName()
+                imageRef
         );
-        publishDeploymentRequested(request, artifact);
+        publishDeploymentRequested(request, artifact, imageRef);
     }
 
-    private void buildImage(GenerationRequest request, GenerationArtifact artifact) {
+    private String buildImage(GenerationRequest request, GenerationArtifact artifact) {
         try {
-            imageBuilderPort.build(artifact);
+            return imageBuilderPort.build(artifact);
         } catch (RuntimeException exception) {
             transition(
                     request,
@@ -116,7 +135,17 @@ public class ProcessGenerationRequestService implements ProcessGenerationRequest
         }
     }
 
-    private void publishDeploymentRequested(GenerationRequest request, GenerationArtifact artifact) {
+    private void publishDeploymentRequested(GenerationRequest request, GenerationArtifact artifact, String imageRef) {
+        if (imageRef == null) {
+            log.info(
+                    "Skipping deployment-requested publication because no image was built requestId={} serviceName={} artifactReference={} workerService=generator-worker",
+                    request.requestId(),
+                    request.name(),
+                    artifact.artifactReference()
+            );
+            return;
+        }
+
         try {
             deploymentRequestedPublisherPort.publish(new DeploymentRequestedEvent(
                     request.requestId(),
@@ -130,7 +159,7 @@ public class ProcessGenerationRequestService implements ProcessGenerationRequest
                     "DEPLOYMENT_REQUESTED",
                     "generator-worker published deployment-requested for artifact: " + artifact.artifactReference(),
                     artifact.artifactReference(),
-                    artifact.imageName()
+                    imageRef
             );
         } catch (RuntimeException exception) {
             log.error(

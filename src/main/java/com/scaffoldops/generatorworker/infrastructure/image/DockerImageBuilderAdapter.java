@@ -30,7 +30,7 @@ public class DockerImageBuilderAdapter implements ImageBuilderPort {
     }
 
     @Override
-    public void build(GenerationArtifact artifact) {
+    public String build(GenerationArtifact artifact) {
         Path projectDirectory = projectDirectory(artifact);
         if (!buildEnabled) {
             log.info(
@@ -39,7 +39,7 @@ public class DockerImageBuilderAdapter implements ImageBuilderPort {
                     artifact.imageName(),
                     projectDirectory
             );
-            return;
+            return null;
         }
 
         List<String> command = List.of(
@@ -84,6 +84,7 @@ public class DockerImageBuilderAdapter implements ImageBuilderPort {
                     artifact.requestId(),
                     artifact.imageName()
             );
+            return artifact.imageName();
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException(

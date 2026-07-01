@@ -43,18 +43,31 @@ public class GenerationRequestedKafkaListener {
                 event.deploymentTarget()
         );
 
-        processGenerationRequestUseCase.process(new ProcessGenerationRequestUseCase.Command(
-                event.requestId(),
-                event.name(),
-                event.template(),
-                event.database(),
-                event.restApi(),
-                event.security(),
-                event.messaging(),
-                event.deploymentTarget(),
-                event.status(),
-                event.createdAt()
-        ));
+        try {
+            processGenerationRequestUseCase.process(new ProcessGenerationRequestUseCase.Command(
+                    event.requestId(),
+                    event.name(),
+                    event.template(),
+                    event.database(),
+                    event.restApi(),
+                    event.security(),
+                    event.messaging(),
+                    event.deploymentTarget(),
+                    event.status(),
+                    event.createdAt()
+            ));
+        } catch (RuntimeException exception) {
+            log.error(
+                    "Failed to process generation-requested event topic={} requestId={} serviceName={} template={} deploymentTarget={} workerService=generator-worker",
+                    kafkaTopicProperties.generationRequested(),
+                    event.requestId(),
+                    event.name(),
+                    event.template(),
+                    event.deploymentTarget(),
+                    exception
+            );
+            throw exception;
+        }
     }
 
     private void validate(GenerationRequestedEvent event) {

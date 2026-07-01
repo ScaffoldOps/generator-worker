@@ -26,7 +26,7 @@ class ProcessGenerationRequestServiceTest {
         List<String> operations = new ArrayList<>();
         RecordingDeploymentRequestedPublisher publisher = new RecordingDeploymentRequestedPublisher(false);
         RecordingLifecyclePort lifecyclePort = new RecordingLifecyclePort(operations);
-        RecordingImageBuilder imageBuilder = new RecordingImageBuilder(false, operations);
+        RecordingImageBuilder imageBuilder = new RecordingImageBuilder(false, operations, true);
         RecordingProjectGenerationPort projectGenerationPort = new RecordingProjectGenerationPort(false);
         ProcessGenerationRequestService service =
                 new ProcessGenerationRequestService(publisher, lifecyclePort, imageBuilder, projectGenerationPort);
@@ -50,10 +50,36 @@ class ProcessGenerationRequestServiceTest {
     }
 
     @Test
+    void shouldMarkGeneratedWithoutImageRefAndSkipDeploymentWhenImageBuildIsDisabled() {
+        List<String> operations = new ArrayList<>();
+        RecordingDeploymentRequestedPublisher publisher = new RecordingDeploymentRequestedPublisher(false);
+        RecordingLifecyclePort lifecyclePort = new RecordingLifecyclePort(operations);
+        RecordingImageBuilder imageBuilder = new RecordingImageBuilder(false, operations, false);
+        RecordingProjectGenerationPort projectGenerationPort = new RecordingProjectGenerationPort(false);
+        ProcessGenerationRequestService service =
+                new ProcessGenerationRequestService(publisher, lifecyclePort, imageBuilder, projectGenerationPort);
+
+        service.process(command());
+
+        assertThat(projectGenerationPort.invocations).isEqualTo(1);
+        assertThat(imageBuilder.artifacts).containsExactly(projectGenerationPort.artifact);
+        assertThat(publisher.events).isEmpty();
+        assertThat(lifecyclePort.updates).hasSize(3);
+        assertThat(lifecyclePort.updates.get(0).status()).isEqualTo("RECEIVED");
+        assertThat(lifecyclePort.updates.get(1).status()).isEqualTo("GENERATING");
+        assertThat(lifecyclePort.updates.get(2).status()).isEqualTo("GENERATED");
+        assertThat(lifecyclePort.updates.get(2).message()).contains("skipped Docker image build");
+        assertThat(lifecyclePort.updates.get(2).artifactRef())
+                .isEqualTo(projectGenerationPort.artifact.artifactReference());
+        assertThat(lifecyclePort.updates.get(2).imageRef()).isNull();
+        assertThat(operations).containsSubsequence("docker-build", "lifecycle-GENERATED");
+    }
+
+    @Test
     void shouldMarkFailedWhenGenerationThrows() {
         RecordingDeploymentRequestedPublisher publisher = new RecordingDeploymentRequestedPublisher(false);
         RecordingLifecyclePort lifecyclePort = new RecordingLifecyclePort();
-        RecordingImageBuilder imageBuilder = new RecordingImageBuilder(false, new ArrayList<>());
+        RecordingImageBuilder imageBuilder = new RecordingImageBuilder(false, new ArrayList<>(), true);
         RecordingProjectGenerationPort projectGenerationPort = new RecordingProjectGenerationPort(true);
         ProcessGenerationRequestService service =
                 new ProcessGenerationRequestService(publisher, lifecyclePort, imageBuilder, projectGenerationPort);
@@ -75,7 +101,7 @@ class ProcessGenerationRequestServiceTest {
     void shouldMarkFailedAndNotPublishDeploymentWhenImageBuildThrows() {
         RecordingDeploymentRequestedPublisher publisher = new RecordingDeploymentRequestedPublisher(false);
         RecordingLifecyclePort lifecyclePort = new RecordingLifecyclePort();
-        RecordingImageBuilder imageBuilder = new RecordingImageBuilder(true, new ArrayList<>());
+        RecordingImageBuilder imageBuilder = new RecordingImageBuilder(true, new ArrayList<>(), true);
         RecordingProjectGenerationPort projectGenerationPort = new RecordingProjectGenerationPort(false);
         ProcessGenerationRequestService service =
                 new ProcessGenerationRequestService(publisher, lifecyclePort, imageBuilder, projectGenerationPort);
@@ -101,7 +127,7 @@ class ProcessGenerationRequestServiceTest {
     void shouldKeepGeneratedStatusWhenDeploymentPublicationThrows() {
         RecordingDeploymentRequestedPublisher publisher = new RecordingDeploymentRequestedPublisher(true);
         RecordingLifecyclePort lifecyclePort = new RecordingLifecyclePort();
-        RecordingImageBuilder imageBuilder = new RecordingImageBuilder(false, new ArrayList<>());
+        RecordingImageBuilder imageBuilder = new RecordingImageBuilder(false, new ArrayList<>(), true);
         RecordingProjectGenerationPort projectGenerationPort = new RecordingProjectGenerationPort(false);
         ProcessGenerationRequestService service =
                 new ProcessGenerationRequestService(publisher, lifecyclePort, imageBuilder, projectGenerationPort);
@@ -122,7 +148,7 @@ class ProcessGenerationRequestServiceTest {
         return new ProcessGenerationRequestUseCase.Command(
                 UUID.randomUUID(),
                 "billing-service",
-                "spring-boot-hexagonal",
+                "spring-boot-hello-world",
                 true,
                 true,
                 true,
@@ -181,21 +207,24 @@ class ProcessGenerationRequestServiceTest {
 
     private static final class RecordingImageBuilder implements ImageBuilderPort {
         private final boolean fail;
+        private final boolean buildProducesImage;
         private final List<GenerationArtifact> artifacts = new ArrayList<>();
         private final List<String> operations;
 
-        private RecordingImageBuilder(boolean fail, List<String> operations) {
+        private RecordingImageBuilder(boolean fail, List<String> operations, boolean buildProducesImage) {
             this.fail = fail;
             this.operations = operations;
+            this.buildProducesImage = buildProducesImage;
         }
 
         @Override
-        public void build(GenerationArtifact artifact) {
+        public String build(GenerationArtifact artifact) {
             artifacts.add(artifact);
             operations.add("docker-build");
             if (fail) {
                 throw new IllegalStateException("image build failure");
             }
+            return buildProducesImage ? artifact.imageName() : null;
         }
     }
 

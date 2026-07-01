@@ -26,8 +26,9 @@ class DockerImageBuilderAdapterTest {
         );
         DockerImageBuilderAdapter adapter = new DockerImageBuilderAdapter(true, dockerCommand.toString());
 
-        adapter.build(artifact(projectDirectory));
+        String imageRef = adapter.build(artifact(projectDirectory));
 
+        assertThat(imageRef).isEqualTo("scaffoldops/billing-service:11111111-1111-1111-1111-111111111111");
         assertThat(Files.readAllLines(argumentsFile)).containsExactly(
                 "build",
                 "--tag",
@@ -58,8 +59,9 @@ class DockerImageBuilderAdapterTest {
         );
         DockerImageBuilderAdapter adapter = new DockerImageBuilderAdapter(false, dockerCommand.toString());
 
-        adapter.build(artifact(projectDirectory));
+        String imageRef = adapter.build(artifact(projectDirectory));
 
+        assertThat(imageRef).isNull();
         assertThat(argumentsFile).doesNotExist();
     }
 
