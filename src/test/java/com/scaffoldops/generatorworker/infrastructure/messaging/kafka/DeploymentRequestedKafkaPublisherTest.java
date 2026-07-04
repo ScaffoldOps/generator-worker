@@ -35,7 +35,12 @@ class DeploymentRequestedKafkaPublisherTest {
 
         DeploymentRequestedKafkaPublisher publisher = new DeploymentRequestedKafkaPublisher(
                 kafkaTemplate,
-                new KafkaTopicProperties("generation-requested", "deployment-requested", "generation-requested-dlt"),
+                new KafkaTopicProperties(
+                        "generation-requested",
+                        "deployment-requested",
+                        "generation-requested-dlt",
+                        "artifact-cleanup-requested"
+                ),
                 tempDir.toString()
         );
 

@@ -6,6 +6,9 @@ app:
   generation:
     manifest-output-dir: ${GENERATION_MANIFEST_OUTPUT_DIR:/var/lib/generator-worker/manifests}
     handoff-state-dir: ${GENERATION_HANDOFF_STATE_DIR:/var/lib/generator-worker/handoff}
+  kafka:
+    topics:
+      artifact-cleanup-requested: ${ARTIFACT_CLEANUP_REQUESTED_TOPIC:artifact-cleanup-requested}
   lifecycle:
     base-url: ${GENERATOR_API_BASE_URL:http://generator-api-service.scaffoldops-pre.svc.cluster.local/api/generator/v1}
     http-enabled: ${GENERATOR_API_LIFECYCLE_HTTP_ENABLED:false}

@@ -5,6 +5,7 @@
 ## Consumed Kafka topic
 
 - Topic: `generation-requested`
+- Topic: `artifact-cleanup-requested`
 - Consumer group: `generator-worker`
 
 ## Produced Kafka topic
@@ -24,6 +25,27 @@ In `dev`, Kafka defaults to `kafka.scaffoldops-dev.svc.cluster.local:9092`.
 6. `ImageBuilderPort` runs `docker build` against the generated project and tags the local image as `scaffoldops/<serviceName>:<requestId>`.
 7. `DeploymentRequestedPublisherPort` publishes `deployment-requested` only after the local image build succeeds.
 8. If generation, image build, or publish processing throws, the service emits `FAILED`.
+
+## Artifact cleanup flow
+
+Generated project artifacts live under:
+
+```text
+/var/lib/generator-worker/manifests/<serviceName>-<requestId>/
+```
+
+When `generator-api` deletes a generation request, it publishes an
+`artifact-cleanup-requested` event. `generator-worker` consumes that event and
+deletes the matching generated artifact directory from its configured
+`GENERATION_MANIFEST_OUTPUT_DIR`.
+
+Cleanup is idempotent: if the directory is already absent, the worker logs that
+state and treats the cleanup as successful. Cleanup is path-safe: the worker
+derives the directory from the stored request id and service name, normalizes
+the result, and only deletes below the configured manifest output directory.
+
+This is still PVC-based MVP storage. There is no MinIO/S3-backed Artifact Store,
+artifact download API, or `deployment-worker` in this flow.
 
 ## Event contract
 
@@ -64,6 +86,7 @@ Main runtime properties:
 - `KAFKA_BOOTSTRAP_SERVERS`
 - `KAFKA_CONSUMER_GROUP`
 - `GENERATION_REQUESTED_TOPIC`
+- `ARTIFACT_CLEANUP_REQUESTED_TOPIC`
 - `DEPLOYMENT_REQUESTED_TOPIC`
 - `GENERATOR_API_BASE_URL`
 - `GENERATOR_API_LIFECYCLE_HTTP_ENABLED`
@@ -84,6 +107,7 @@ Kafka settings are configured explicitly in `src/main/resources/application.yml`
 - listener concurrency `1`
 - listener retry via `DefaultErrorHandler`
 - outbound Kafka JSON serialization for `DeploymentRequestedEvent`
+- cleanup Kafka JSON deserialization for `ArtifactCleanupRequestedEvent`
 
 Profile overrides:
 
@@ -254,6 +278,19 @@ kubectl -n scaffoldops-dev exec deploy/generator-worker -- \
   find /var/lib/generator-worker/manifests -maxdepth 4 -type f
 ```
 
+Trigger cleanup through the API by deleting the source request:
+
+```bash
+kubectl -n scaffoldops-dev exec deploy/generator-worker -- \
+  find /var/lib/generator-worker/manifests -maxdepth 2 -type d
+curl -fsS -X DELETE \
+  -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:8081/api/generator/v1/generation-requests/<requestId>"
+kubectl -n scaffoldops-dev logs deploy/generator-worker --tail=100
+kubectl -n scaffoldops-dev exec deploy/generator-worker -- \
+  test ! -d /var/lib/generator-worker/manifests/<serviceName>-<requestId>
+```
+
 Copy one generated project to the host:
 
 ```bash
@@ -277,6 +314,7 @@ The deployment exposes env vars for:
 
 - `SPRING_KAFKA_BOOTSTRAP_SERVERS`
 - `GENERATION_REQUESTED_TOPIC`
+- `ARTIFACT_CLEANUP_REQUESTED_TOPIC`
 - `GENERATOR_API_BASE_URL`
 - `GENERATOR_API_LIFECYCLE_HTTP_ENABLED`
 - `GENERATOR_API_BEARER_TOKEN`

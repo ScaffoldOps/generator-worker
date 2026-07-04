@@ -294,6 +294,11 @@ This PVC is only MVP persistence so artifacts survive a worker pod restart. It
 is not a real Artifact Store: there is still no MinIO/S3-backed store, no
 download API, and `deployment-worker` remains outside this MVP.
 
+When a generation request is deleted through `generator-api`, the API publishes
+an `artifact-cleanup-requested` Kafka event. `generator-worker` consumes it and
+deletes the matching directory below `/var/lib/generator-worker/manifests`.
+Cleanup is idempotent, so a missing directory is logged and treated as success.
+
 Verify the PVC and inspect generated files:
 
 ```bash
@@ -319,4 +324,16 @@ kubectl -n scaffoldops-dev rollout restart deployment/generator-worker
 kubectl -n scaffoldops-dev rollout status deployment/generator-worker --timeout=300s
 kubectl -n scaffoldops-dev exec deploy/generator-worker -- \
   find /var/lib/generator-worker/manifests -maxdepth 4 -type f
+```
+
+Check cleanup after deleting the request:
+
+```bash
+curl -fsS -X DELETE \
+  -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:8081/api/generator/v1/generation-requests/$REQUEST_ID"
+
+kubectl -n scaffoldops-dev logs deploy/generator-worker --tail=100
+kubectl -n scaffoldops-dev exec deploy/generator-worker -- \
+  test ! -d "/var/lib/generator-worker/manifests/$SERVICE_NAME-$REQUEST_ID"
 ```

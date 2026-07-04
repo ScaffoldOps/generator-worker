@@ -17,7 +17,7 @@ class GenerationRequestedKafkaListenerTest {
     void shouldValidateAndDelegateToApplicationService() {
         RecordingUseCase useCase = new RecordingUseCase();
         GenerationRequestedKafkaListener listener =
-                new GenerationRequestedKafkaListener(useCase, new KafkaTopicProperties("generation-requested", "deployment-requested", "generation-requested-dlt"));
+                new GenerationRequestedKafkaListener(useCase, kafkaTopicProperties());
 
         GenerationRequestedEvent event = validEvent();
 
@@ -40,7 +40,7 @@ class GenerationRequestedKafkaListenerTest {
     void shouldRejectEventWhenRequiredFieldIsMissing() {
         RecordingUseCase useCase = new RecordingUseCase();
         GenerationRequestedKafkaListener listener =
-                new GenerationRequestedKafkaListener(useCase, new KafkaTopicProperties("generation-requested", "deployment-requested", "generation-requested-dlt"));
+                new GenerationRequestedKafkaListener(useCase, kafkaTopicProperties());
 
         GenerationRequestedEvent event = new GenerationRequestedEvent(
                 null,
@@ -74,6 +74,15 @@ class GenerationRequestedKafkaListenerTest {
                 "kubernetes",
                 "REQUESTED",
                 OffsetDateTime.parse("2026-03-24T12:00:00Z")
+        );
+    }
+
+    private KafkaTopicProperties kafkaTopicProperties() {
+        return new KafkaTopicProperties(
+                "generation-requested",
+                "deployment-requested",
+                "generation-requested-dlt",
+                "artifact-cleanup-requested"
         );
     }
 

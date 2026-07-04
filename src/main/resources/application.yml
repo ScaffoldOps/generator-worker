@@ -35,6 +35,7 @@ app:
       generation-requested: ${GENERATION_REQUESTED_TOPIC:generation-requested}
       deployment-requested: ${DEPLOYMENT_REQUESTED_TOPIC:deployment-requested}
       generation-requested-dlt: ${GENERATION_REQUESTED_DLT_TOPIC:generation-requested-dlt}
+      artifact-cleanup-requested: ${ARTIFACT_CLEANUP_REQUESTED_TOPIC:artifact-cleanup-requested}
   lifecycle:
     base-url: ${GENERATOR_API_BASE_URL:http://generator-api-service/api/generator/v1}
     http-enabled: ${GENERATOR_API_LIFECYCLE_HTTP_ENABLED:false}

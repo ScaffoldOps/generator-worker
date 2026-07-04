@@ -6,6 +6,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public record KafkaTopicProperties(
         String generationRequested,
         String deploymentRequested,
-        String generationRequestedDlt
+        String generationRequestedDlt,
+        String artifactCleanupRequested
 ) {
 }

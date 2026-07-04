@@ -35,6 +35,8 @@ spec:
               value: "generator-worker"
             - name: GENERATION_REQUESTED_TOPIC
               value: "generation-requested"
+            - name: ARTIFACT_CLEANUP_REQUESTED_TOPIC
+              value: "artifact-cleanup-requested"
             - name: GENERATOR_API_BASE_URL
               value: "http://generator-api:8081/api/generator/v1"
             - name: GENERATOR_API_LIFECYCLE_HTTP_ENABLED

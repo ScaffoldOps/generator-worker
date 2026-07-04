@@ -22,7 +22,8 @@ Included now:
 
 - `domain`
   - `GenerationRequestedEvent`: inbound Kafka payload contract
-  - `DeploymentRequestedEvent`: outbound Kafka payload contract
+- `DeploymentRequestedEvent`: outbound Kafka payload contract
+- `ArtifactCleanupRequestedEvent`: inbound Kafka payload contract for artifact cleanup after request deletion
   - `GenerationRequest`: internal application model
   - `GenerationArtifact`: durable generation result model
   - `GenerationLifecycleUpdate`: outbound lifecycle update model
@@ -31,15 +32,18 @@ Included now:
   - `GenerationLifecyclePort`: outbound status-update port
   - `ProjectGenerationPort`: outbound generation port
   - `ImageBuilderPort`: outbound local image-build port
-  - `DeploymentRequestedPublisherPort`: outbound deployment-event port
+- `DeploymentRequestedPublisherPort`: outbound deployment-event port
+- `CleanupGeneratedArtifactUseCase`: inbound cleanup use case
   - `ProcessGenerationRequestService`: lifecycle orchestration service
 - `infrastructure`
-  - `GenerationRequestedKafkaListener`: inbound Kafka adapter
+- `GenerationRequestedKafkaListener`: inbound Kafka adapter
+- `ArtifactCleanupRequestedKafkaListener`: inbound cleanup Kafka adapter
   - `KafkaConfiguration`: explicit consumer and deserializer wiring
   - `GeneratorApiGenerationLifecycleAdapter`: optional generator-api lifecycle adapter
   - `ManifestWritingProjectGenerationAdapter`: deterministic manifest writer
   - `DockerImageBuilderAdapter`: local `docker build` adapter
-  - `DeploymentRequestedKafkaPublisher`: outbound Kafka deployment-event adapter
+- `DeploymentRequestedKafkaPublisher`: outbound Kafka deployment-event adapter
+- `CleanupGeneratedArtifactService`: deletes generated artifact directories under the configured manifest output directory
 
 Dependency direction remains one-way:
 
@@ -77,6 +81,13 @@ Explicit settings:
 - JSON serialization for outbound `DeploymentRequestedEvent`
 
 `application-dev.yml` points Kafka to `kafka.scaffoldops-dev.svc.cluster.local:9092`.
+
+Cleanup uses topic `artifact-cleanup-requested`. `generator-api` publishes this
+event after a generation request is deleted; `generator-worker` consumes it and
+removes `/var/lib/generator-worker/manifests/<serviceName>-<requestId>/` from
+the PVC-backed manifest directory. Missing directories are treated as success,
+and cleanup rejects paths that would escape the configured manifest output
+directory.
 
 ## Producer-side durability and idempotency
 
