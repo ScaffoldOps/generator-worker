@@ -15,7 +15,8 @@ spec:
     spec:
       volumes:
         - name: generator-worker-data
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: generator-worker-artifacts-pvc
       containers:
         - name: generator-worker
           image: victodomvar/scaffoldops-generator-worker:latest

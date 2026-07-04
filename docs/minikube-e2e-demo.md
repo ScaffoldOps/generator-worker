@@ -273,3 +273,50 @@ port `80`.
 In this Kubernetes mode the worker skips the direct `docker build` step because
 the pod does not have Docker access. Use the local-worker path above when the
 demo must prove that the generated Docker image is built.
+
+## Kubernetes Artifact Persistence
+
+The Kubernetes worker deployment mounts
+`generator-worker-artifacts-pvc` at `/var/lib/generator-worker`. Generated
+projects stay under the current output directory:
+
+```text
+/var/lib/generator-worker/manifests/<serviceName>-<requestId>/
+```
+
+The callback `artifactRef` continues to use the pod-local file URI:
+
+```text
+file:///var/lib/generator-worker/manifests/<serviceName>-<requestId>/
+```
+
+This PVC is only MVP persistence so artifacts survive a worker pod restart. It
+is not a real Artifact Store: there is still no MinIO/S3-backed store, no
+download API, and `deployment-worker` remains outside this MVP.
+
+Verify the PVC and inspect generated files:
+
+```bash
+kubectl -n scaffoldops-dev get pvc
+kubectl -n scaffoldops-dev exec deploy/generator-worker -- \
+  find /var/lib/generator-worker/manifests -maxdepth 4 -type f
+```
+
+Copy a generated project from the pod to the host:
+
+```bash
+kubectl -n scaffoldops-dev cp \
+  deploy/generator-worker:/var/lib/generator-worker/manifests/<serviceName>-<requestId> \
+  ./<serviceName>-<requestId>
+```
+
+Check that artifacts survive a rollout restart:
+
+```bash
+kubectl -n scaffoldops-dev exec deploy/generator-worker -- \
+  find /var/lib/generator-worker/manifests -maxdepth 4 -type f
+kubectl -n scaffoldops-dev rollout restart deployment/generator-worker
+kubectl -n scaffoldops-dev rollout status deployment/generator-worker --timeout=300s
+kubectl -n scaffoldops-dev exec deploy/generator-worker -- \
+  find /var/lib/generator-worker/manifests -maxdepth 4 -type f
+```

@@ -5,5 +5,6 @@ namespace: scaffoldops-dev
 
 resources:
   - generator-api-alias-service.yaml
+  - generator-worker-artifacts-pvc.yaml
   - generator-worker-deployment.yaml
   - generator-worker-service.yaml

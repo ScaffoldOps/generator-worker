@@ -232,7 +232,48 @@ For the current Minikube MVP walkthrough, including the Docker-in-pod
 limitation and the recommended local-worker E2E path, see
 [docs/minikube-e2e-demo.md](docs/minikube-e2e-demo.md).
 
-The deployment mounts `/var/lib/generator-worker` for manifest and handoff marker files and exposes env vars for:
+The deployment mounts `/var/lib/generator-worker` from the
+`generator-worker-artifacts-pvc` PersistentVolumeClaim. Generated projects keep
+the existing output path under `/var/lib/generator-worker/manifests`, so
+successful callbacks still report artifact references like:
+
+```text
+file:///var/lib/generator-worker/manifests/<serviceName>-<requestId>/
+```
+
+The PVC is an MVP persistence layer for generated artifacts and local handoff
+markers. It survives `generator-worker` pod recreation, but it is not a real
+Artifact Store: there is no MinIO/S3 integration, no external artifact API, and
+`deployment-worker` remains outside the MVP.
+
+Inspect the generated files in the running pod:
+
+```bash
+kubectl -n scaffoldops-dev get pvc
+kubectl -n scaffoldops-dev exec deploy/generator-worker -- \
+  find /var/lib/generator-worker/manifests -maxdepth 4 -type f
+```
+
+Copy one generated project to the host:
+
+```bash
+kubectl -n scaffoldops-dev cp \
+  deploy/generator-worker:/var/lib/generator-worker/manifests/<serviceName>-<requestId> \
+  ./<serviceName>-<requestId>
+```
+
+Check persistence across a pod restart:
+
+```bash
+kubectl -n scaffoldops-dev exec deploy/generator-worker -- \
+  find /var/lib/generator-worker/manifests -maxdepth 4 -type f
+kubectl -n scaffoldops-dev rollout restart deployment/generator-worker
+kubectl -n scaffoldops-dev rollout status deployment/generator-worker --timeout=300s
+kubectl -n scaffoldops-dev exec deploy/generator-worker -- \
+  find /var/lib/generator-worker/manifests -maxdepth 4 -type f
+```
+
+The deployment exposes env vars for:
 
 - `SPRING_KAFKA_BOOTSTRAP_SERVERS`
 - `GENERATION_REQUESTED_TOPIC`
