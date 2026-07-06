@@ -34,18 +34,41 @@ Generated project artifacts live under:
 /var/lib/generator-worker/manifests/<serviceName>-<requestId>/
 ```
 
+The `artifactRef` reported back to `generator-api` remains:
+
+```text
+file:///var/lib/generator-worker/manifests/<serviceName>-<requestId>/
+```
+
+Generated artifacts include `pom.xml`, `Dockerfile`, Kubernetes manifests,
+`HelloApplication.java`, `HelloController.java`, and
+`generation-manifest.json`.
+
 When `generator-api` deletes a generation request, it publishes an
 `artifact-cleanup-requested` event. `generator-worker` consumes that event and
 deletes the matching generated artifact directory from its configured
 `GENERATION_MANIFEST_OUTPUT_DIR`.
 
+The cleanup flow is:
+
+```text
+DELETE /generation-requests/{id}
+  -> generator-api
+  -> Kafka topic artifact-cleanup-requested
+  -> generator-worker
+  -> PVC directory deletion
+```
+
 Cleanup is idempotent: if the directory is already absent, the worker logs that
 state and treats the cleanup as successful. Cleanup is path-safe: the worker
 derives the directory from the stored request id and service name, normalizes
 the result, and only deletes below the configured manifest output directory.
+Cleanup is eventually consistent, not transactional with the API database
+delete; if `generator-worker` is down, cleanup waits until Kafka is consumed.
 
 This is still PVC-based MVP storage. There is no MinIO/S3-backed Artifact Store,
-artifact download API, or `deployment-worker` in this flow.
+artifact download API, or `deployment-worker` in this flow. Full reconciliation
+of stuck cleanup or generation states remains future work.
 
 ## Event contract
 
@@ -282,11 +305,11 @@ Trigger cleanup through the API by deleting the source request:
 
 ```bash
 kubectl -n scaffoldops-dev exec deploy/generator-worker -- \
-  find /var/lib/generator-worker/manifests -maxdepth 2 -type d
+  ls -la /var/lib/generator-worker/manifests
 curl -fsS -X DELETE \
   -H "Authorization: Bearer $TOKEN" \
   "http://localhost:8081/api/generator/v1/generation-requests/<requestId>"
-kubectl -n scaffoldops-dev logs deploy/generator-worker --tail=100
+kubectl -n scaffoldops-dev logs deploy/generator-worker --tail=150 | grep -i cleanup
 kubectl -n scaffoldops-dev exec deploy/generator-worker -- \
   test ! -d /var/lib/generator-worker/manifests/<serviceName>-<requestId>
 ```

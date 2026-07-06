@@ -298,6 +298,8 @@ When a generation request is deleted through `generator-api`, the API publishes
 an `artifact-cleanup-requested` Kafka event. `generator-worker` consumes it and
 deletes the matching directory below `/var/lib/generator-worker/manifests`.
 Cleanup is idempotent, so a missing directory is logged and treated as success.
+Cleanup is eventually consistent, not transactional with the API database
+delete; if `generator-worker` is down, cleanup waits until Kafka is consumed.
 
 Verify the PVC and inspect generated files:
 
@@ -329,11 +331,14 @@ kubectl -n scaffoldops-dev exec deploy/generator-worker -- \
 Check cleanup after deleting the request:
 
 ```bash
+kubectl -n scaffoldops-dev exec deploy/generator-worker -- \
+  ls -la /var/lib/generator-worker/manifests
+
 curl -fsS -X DELETE \
   -H "Authorization: Bearer $TOKEN" \
   "http://localhost:8081/api/generator/v1/generation-requests/$REQUEST_ID"
 
-kubectl -n scaffoldops-dev logs deploy/generator-worker --tail=100
+kubectl -n scaffoldops-dev logs deploy/generator-worker --tail=150 | grep -i cleanup
 kubectl -n scaffoldops-dev exec deploy/generator-worker -- \
   test ! -d "/var/lib/generator-worker/manifests/$SERVICE_NAME-$REQUEST_ID"
 ```

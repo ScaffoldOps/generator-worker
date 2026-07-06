@@ -82,18 +82,21 @@ Explicit settings:
 
 `application-dev.yml` points Kafka to `kafka.scaffoldops-dev.svc.cluster.local:9092`.
 
-Cleanup uses topic `artifact-cleanup-requested`. `generator-api` publishes this
-event after a generation request is deleted; `generator-worker` consumes it and
-removes `/var/lib/generator-worker/manifests/<serviceName>-<requestId>/` from
-the PVC-backed manifest directory. Missing directories are treated as success,
-and cleanup rejects paths that would escape the configured manifest output
-directory.
+Cleanup uses topic `artifact-cleanup-requested`. `generator-api` owns request
+lifecycle state and publishes this event after a generation request is deleted;
+`generator-worker` owns generated artifacts and consumes the event to remove
+`/var/lib/generator-worker/manifests/<serviceName>-<requestId>/` from the
+PVC-backed manifest directory. `generator-api` must not access the worker PVC
+directly. Missing directories are treated as success, and cleanup rejects paths
+that would escape the configured manifest output directory. Cleanup is
+eventually consistent, not transactional with the API database delete.
 
 ## Producer-side durability and idempotency
 
 - Projects are written to `app.generation.manifest-output-dir`
 - Project directories are deterministic: `<serviceName>-<requestId>`
 - A `generation-manifest.json` file records the resolved service, package, image, and request variables
+- Generated output includes `pom.xml`, `Dockerfile`, Kubernetes manifests, `HelloApplication.java`, `HelloController.java`, and `generation-manifest.json`
 - Existing completed projects are reused for repeat processing of the same `requestId`
 - Successful `deployment-requested` publications create a local marker file under `app.generation.handoff-state-dir`
 - Existing marker files suppress duplicate `deployment-requested` publication on the same worker filesystem
