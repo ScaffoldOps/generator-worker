@@ -12,10 +12,11 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
-import org.springframework.util.StringUtils;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
+import java.time.Clock;
 import java.util.Set;
 
 @Component
@@ -28,13 +29,17 @@ public class GeneratorApiGenerationLifecycleAdapter implements GenerationLifecyc
     private final String lifecycleBaseUrl;
     private final String lifecycleStatusUpdatePath;
     private final boolean lifecycleHttpEnabled;
-    private final String lifecycleBearerToken;
+    private final GeneratorApiAccessTokenProvider accessTokenProvider;
 
     @Autowired
     public GeneratorApiGenerationLifecycleAdapter(
             @Value("${app.lifecycle.base-url:http://generator-api-service/api/generator/v1}") String lifecycleBaseUrl,
             @Value("${app.lifecycle.status-update-path:/internal/generation-requests/{requestId}/status}") String lifecycleStatusUpdatePath,
             @Value("${app.lifecycle.http-enabled:false}") boolean lifecycleHttpEnabled,
+            @Value("${app.lifecycle.auth.mode:client-credentials}") String lifecycleAuthMode,
+            @Value("${app.lifecycle.auth.token-url:}") String lifecycleTokenUrl,
+            @Value("${app.lifecycle.auth.client-id:}") String lifecycleClientId,
+            @Value("${app.lifecycle.auth.client-secret:}") String lifecycleClientSecret,
             @Value("${app.lifecycle.bearer-token:}") String lifecycleBearerToken
     ) {
         this(
@@ -42,7 +47,15 @@ public class GeneratorApiGenerationLifecycleAdapter implements GenerationLifecyc
                 lifecycleBaseUrl,
                 lifecycleStatusUpdatePath,
                 lifecycleHttpEnabled,
-                lifecycleBearerToken
+                GeneratorApiAccessTokenProviderFactory.create(
+                        new RestTemplate(new JdkClientHttpRequestFactory()),
+                        lifecycleAuthMode,
+                        lifecycleTokenUrl,
+                        lifecycleClientId,
+                        lifecycleClientSecret,
+                        lifecycleBearerToken,
+                        Clock.systemUTC()
+                )
         );
     }
 
@@ -53,11 +66,27 @@ public class GeneratorApiGenerationLifecycleAdapter implements GenerationLifecyc
             boolean lifecycleHttpEnabled,
             String lifecycleBearerToken
     ) {
+        this(
+                restTemplate,
+                lifecycleBaseUrl,
+                lifecycleStatusUpdatePath,
+                lifecycleHttpEnabled,
+                new StaticGeneratorApiAccessTokenProvider(lifecycleBearerToken)
+        );
+    }
+
+    GeneratorApiGenerationLifecycleAdapter(
+            RestTemplate restTemplate,
+            String lifecycleBaseUrl,
+            String lifecycleStatusUpdatePath,
+            boolean lifecycleHttpEnabled,
+            GeneratorApiAccessTokenProvider accessTokenProvider
+    ) {
         this.restTemplate = restTemplate;
         this.lifecycleBaseUrl = lifecycleBaseUrl;
         this.lifecycleStatusUpdatePath = lifecycleStatusUpdatePath;
         this.lifecycleHttpEnabled = lifecycleHttpEnabled;
-        this.lifecycleBearerToken = lifecycleBearerToken;
+        this.accessTokenProvider = accessTokenProvider;
     }
 
     @Override
@@ -84,13 +113,7 @@ public class GeneratorApiGenerationLifecycleAdapter implements GenerationLifecyc
         }
 
         try {
-            restTemplate.exchange(
-                    targetUrl,
-                    HttpMethod.PATCH,
-                    new HttpEntity<>(payload(update), headers()),
-                    Void.class,
-                    update.requestId()
-            );
+            patchLifecycleStatus(targetUrl, update);
             log.info(
                     "Patched lifecycle update requestId={} status={} targetBaseUrl={} workerService=generator-worker",
                     update.requestId(),
@@ -99,23 +122,39 @@ public class GeneratorApiGenerationLifecycleAdapter implements GenerationLifecyc
             );
         } catch (RestClientException exception) {
             log.error(
-                    "Generator-api lifecycle callback failed requestId={} status={} targetUrl={} bearerTokenConfigured={} workerService=generator-worker",
+                    "Generator-api lifecycle callback failed requestId={} status={} targetUrl={} workerService=generator-worker",
                     update.requestId(),
                     update.status(),
                     targetUrl,
-                    StringUtils.hasText(lifecycleBearerToken),
                     exception
             );
             throw new IllegalStateException("generator-api lifecycle update failed for requestId=" + update.requestId(), exception);
         }
     }
 
+    private void patchLifecycleStatus(String targetUrl, GenerationLifecycleUpdate update) {
+        try {
+            exchange(targetUrl, update);
+        } catch (HttpClientErrorException.Unauthorized exception) {
+            accessTokenProvider.invalidate();
+            exchange(targetUrl, update);
+        }
+    }
+
+    private void exchange(String targetUrl, GenerationLifecycleUpdate update) {
+        restTemplate.exchange(
+                targetUrl,
+                HttpMethod.PATCH,
+                new HttpEntity<>(payload(update), headers()),
+                Void.class,
+                update.requestId()
+        );
+    }
+
     private HttpHeaders headers() {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        if (StringUtils.hasText(lifecycleBearerToken)) {
-            headers.setBearerAuth(lifecycleBearerToken);
-        }
+        accessTokenProvider.accessToken().ifPresent(headers::setBearerAuth);
         return headers;
     }
 

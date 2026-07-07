@@ -108,15 +108,18 @@ These safeguards are local to the worker filesystem. They improve single-node or
 - `GenerationLifecyclePort` remains the only lifecycle update path from the application layer
 - `GeneratorApiGenerationLifecycleAdapter` can PATCH status updates to `generator-api` when `app.lifecycle.http-enabled=true`
 - The `local` profile enables HTTP callbacks by default; `dev` and `pre` require explicit enablement
-- Callback configuration is supplied through `GENERATOR_API_BASE_URL`, `GENERATOR_API_LIFECYCLE_HTTP_ENABLED`, `GENERATOR_API_LIFECYCLE_STATUS_UPDATE_PATH`, and `GENERATOR_API_BEARER_TOKEN`
+- Callback configuration is supplied through `GENERATOR_API_BASE_URL`, `GENERATOR_API_LIFECYCLE_HTTP_ENABLED`, `GENERATOR_API_LIFECYCLE_STATUS_UPDATE_PATH`, `GENERATOR_API_AUTH_MODE`, `GENERATOR_API_TOKEN_URL`, `GENERATOR_API_CLIENT_ID`, `GENERATOR_API_CLIENT_SECRET`, and optional local fallback `GENERATOR_API_BEARER_TOKEN`
 - HTTP contract tests validate `GENERATING`, `GENERATED`, and `FAILED` payloads
 - `RECEIVED` and `DEPLOYMENT_REQUESTED` remain worker-local transitions and are not sent to `generator-api`
 - When HTTP lifecycle updates are disabled, the adapter logs the transition instead
 
 The callback uses `PATCH {baseUrl}{statusUpdatePath}` with `status`, `message`,
 `artifactRef`, and `imageRef` in the JSON body. The request id is supplied only
-as a path variable. A configured bearer token is added to the Authorization
-header.
+as a path variable. In deployed environments the worker obtains a bearer token
+from Keycloak with the `client_credentials` grant, caches it in memory until
+shortly before expiration, and retries once with a refreshed token after a
+`401 Unauthorized`. `GENERATOR_API_BEARER_TOKEN` is retained only as an optional
+static-token fallback for local development.
 
 `GENERATED` is emitted only after project generation and Docker image build
 both succeed. Generation or image build failures emit `FAILED`.
@@ -126,5 +129,4 @@ both succeed. Generation or image build failures emit `FAILED`.
 - Generated output is intentionally limited to a minimal Hello World Spring Boot service
 - Cross-instance idempotency is not solved yet
 - No dead-letter topic or outbox/reconciliation workflow yet
-- Service-account token acquisition is still external configuration
 - No public HTTP controller surface for generation requests

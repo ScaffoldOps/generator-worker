@@ -41,11 +41,17 @@ spec:
               value: "http://generator-api:8081/api/generator/v1"
             - name: GENERATOR_API_LIFECYCLE_HTTP_ENABLED
               value: "true"
-            - name: GENERATOR_API_BEARER_TOKEN
+            - name: GENERATOR_API_AUTH_MODE
+              value: "client-credentials"
+            - name: GENERATOR_API_TOKEN_URL
+              value: "http://keycloak.security.svc.cluster.local:8080/realms/scaffoldops-dev/protocol/openid-connect/token"
+            - name: GENERATOR_API_CLIENT_ID
+              value: "scaffoldops-generator-worker"
+            - name: GENERATOR_API_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: generator-api-worker-token
-                  key: token
+                  name: generator-api-worker-client
+                  key: client-secret
             - name: GENERATION_MANIFEST_OUTPUT_DIR
               value: "/var/lib/generator-worker/manifests"
             - name: GENERATION_HANDOFF_STATE_DIR

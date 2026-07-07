@@ -125,6 +125,7 @@ GENERATION_REQUESTED_TOPIC=generation-requested \
 GENERATOR_API_LIFECYCLE_HTTP_ENABLED=true \
 GENERATOR_API_BASE_URL=http://localhost:8081/api/generator/v1 \
 GENERATOR_API_LIFECYCLE_STATUS_UPDATE_PATH=/internal/generation-requests/{requestId}/status \
+GENERATOR_API_AUTH_MODE=static-token \
 GENERATOR_API_BEARER_TOKEN="$TOKEN" \
 GENERATION_MANIFEST_OUTPUT_DIR=/tmp/scaffoldops-minikube-worker/manifests \
 GENERATION_HANDOFF_STATE_DIR=/tmp/scaffoldops-minikube-worker/handoff \
@@ -132,8 +133,8 @@ DOCKER_COMMAND=docker \
 ./mvnw spring-boot:run
 ```
 
-`GENERATOR_API_BEARER_TOKEN` is required when `generator-api` protects the
-internal callback endpoint, which it does by default.
+`GENERATOR_API_AUTH_MODE=static-token` keeps the local demo on an already-issued
+JWT. Cluster deployments should use Keycloak client credentials instead.
 
 ## 5. Create A Generation Request
 
@@ -252,19 +253,26 @@ They configure:
 - `GENERATION_REQUESTED_TOPIC=generation-requested`
 - `GENERATOR_API_BASE_URL=http://generator-api:8081/api/generator/v1`
 - `GENERATOR_API_LIFECYCLE_HTTP_ENABLED=true`
-- optional `GENERATOR_API_BEARER_TOKEN` from secret
-  `generator-api-worker-token`, key `token`
+- `GENERATOR_API_AUTH_MODE=client-credentials`
+- `GENERATOR_API_TOKEN_URL=http://keycloak.security.svc.cluster.local:8080/realms/scaffoldops-dev/protocol/openid-connect/token`
+- `GENERATOR_API_CLIENT_ID=scaffoldops-generator-worker`
+- `GENERATOR_API_CLIENT_SECRET` from secret `generator-api-worker-client`,
+  key `client-secret`
 - `GENERATOR_DOCKER_BUILD_ENABLED=false`
 - generated output under `/var/lib/generator-worker`
 
-Create the token secret only if the worker pod will call the protected internal
-API:
+Create or update the client secret before applying the worker manifests:
 
 ```bash
-kubectl -n scaffoldops-dev create secret generic generator-api-worker-token \
-  --from-literal=token="$TOKEN" \
+kubectl -n scaffoldops-dev create secret generic generator-api-worker-client \
+  --from-literal=client-secret="$GENERATOR_API_CLIENT_SECRET" \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
+
+The worker exchanges that client secret for access tokens using Keycloak's
+`client_credentials` flow. Tokens are cached in memory and refreshed shortly
+before expiration; a lifecycle callback that receives `401 Unauthorized` is
+retried once after forcing a refresh.
 
 The manifests also create a `generator-api` Service alias on port `8081`
 because the existing API service is named `generator-api-service` and exposes

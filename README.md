@@ -114,6 +114,10 @@ Main runtime properties:
 - `GENERATOR_API_BASE_URL`
 - `GENERATOR_API_LIFECYCLE_HTTP_ENABLED`
 - `GENERATOR_API_LIFECYCLE_STATUS_UPDATE_PATH`
+- `GENERATOR_API_AUTH_MODE`
+- `GENERATOR_API_TOKEN_URL`
+- `GENERATOR_API_CLIENT_ID`
+- `GENERATOR_API_CLIENT_SECRET`
 - `GENERATOR_API_BEARER_TOKEN`
 - `GENERATION_MANIFEST_OUTPUT_DIR`
 - `GENERATION_HANDOFF_STATE_DIR`
@@ -150,9 +154,12 @@ Required local configuration:
 - `GENERATOR_API_LIFECYCLE_HTTP_ENABLED=true`
 - `GENERATOR_API_BASE_URL=http://localhost:8081/api/generator/v1`
 - `GENERATOR_API_LIFECYCLE_STATUS_UPDATE_PATH=/internal/generation-requests/{requestId}/status`
+- `GENERATOR_API_AUTH_MODE=static-token`
 - `GENERATOR_API_BEARER_TOKEN=<JWT accepted by generator-api>`
 
 The `local` profile defaults `GENERATOR_API_LIFECYCLE_HTTP_ENABLED` to `true`. Set it to `false` explicitly to run without `generator-api`.
+It also defaults `GENERATOR_API_AUTH_MODE` to `static-token`, so local
+development can still use an already-issued JWT.
 
 Example:
 
@@ -160,6 +167,7 @@ Example:
 SPRING_PROFILES_ACTIVE=local \
 GENERATOR_API_LIFECYCLE_HTTP_ENABLED=true \
 GENERATOR_API_BASE_URL=http://localhost:8081/api/generator/v1 \
+GENERATOR_API_AUTH_MODE=static-token \
 GENERATOR_API_BEARER_TOKEN="$TOKEN" \
 ./mvnw spring-boot:run
 ```
@@ -170,15 +178,25 @@ after the Docker image build succeeds. Only `GENERATING`, `GENERATED`, and
 `FAILED` are sent over HTTP; worker-internal transitions such as `RECEIVED`
 and `DEPLOYMENT_REQUESTED` are not sent.
 
-For the local MVP, export a JWT already used to call the protected
-`generator-api` endpoints:
+For Kubernetes, worker-to-api communication uses Keycloak client credentials.
+Configure a confidential Keycloak client for the worker and provide:
 
 ```bash
-export TOKEN="<generator-api JWT>"
-export GENERATOR_API_BEARER_TOKEN="$TOKEN"
+GENERATOR_API_AUTH_MODE=client-credentials
+GENERATOR_API_TOKEN_URL=http://keycloak.security.svc.cluster.local:8080/realms/scaffoldops-dev/protocol/openid-connect/token
+GENERATOR_API_CLIENT_ID=scaffoldops-generator-worker
+GENERATOR_API_CLIENT_SECRET=<client secret>
 ```
 
-The token is sent as `Authorization: Bearer <token>`. Leaving the variable
+The worker obtains access tokens with `grant_type=client_credentials`, caches
+the token in memory until shortly before expiration, and retries a lifecycle
+callback once with a refreshed token after a `401 Unauthorized`. Tokens and
+client secrets are not written to files and must not be logged.
+
+`GENERATOR_API_BEARER_TOKEN` remains only as an optional fallback for local
+development when `GENERATOR_API_AUTH_MODE=static-token`, or when
+`client-credentials` is selected but the client credentials are not configured.
+The token is sent as `Authorization: Bearer <token>`. Leaving all auth variables
 empty is supported only when the target endpoint is configured without
 authentication.
 

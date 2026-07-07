@@ -11,3 +11,8 @@ app:
     http-enabled: ${GENERATOR_API_LIFECYCLE_HTTP_ENABLED:true}
     status-update-path: ${GENERATOR_API_LIFECYCLE_STATUS_UPDATE_PATH:/internal/generation-requests/{requestId}/status}
     bearer-token: ${GENERATOR_API_BEARER_TOKEN:}
+    auth:
+      mode: ${GENERATOR_API_AUTH_MODE:static-token}
+      token-url: ${GENERATOR_API_TOKEN_URL:}
+      client-id: ${GENERATOR_API_CLIENT_ID:}
+      client-secret: ${GENERATOR_API_CLIENT_SECRET:}
