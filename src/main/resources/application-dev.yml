@@ -16,5 +16,5 @@ app:
     http-enabled: ${GENERATOR_API_LIFECYCLE_HTTP_ENABLED:false}
     status-update-path: ${GENERATOR_API_LIFECYCLE_STATUS_UPDATE_PATH:/internal/generation-requests/{requestId}/status}
     auth:
-      token-url: ${GENERATOR_API_TOKEN_URL:http://keycloak.security.svc.cluster.local:8080/realms/scaffoldops-dev/protocol/openid-connect/token}
+      token-url: ${GENERATOR_API_TOKEN_URL:http://keycloak-dev.security.svc.cluster.local:8080/realms/scaffoldops-dev/protocol/openid-connect/token}
       client-id: ${GENERATOR_API_CLIENT_ID:scaffoldops-generator-worker}

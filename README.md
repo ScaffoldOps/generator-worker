@@ -183,10 +183,15 @@ Configure a confidential Keycloak client for the worker and provide:
 
 ```bash
 GENERATOR_API_AUTH_MODE=client-credentials
-GENERATOR_API_TOKEN_URL=http://keycloak.security.svc.cluster.local:8080/realms/scaffoldops-dev/protocol/openid-connect/token
+GENERATOR_API_TOKEN_URL=http://keycloak-dev.security.svc.cluster.local:8080/realms/scaffoldops-dev/protocol/openid-connect/token
 GENERATOR_API_CLIENT_ID=scaffoldops-generator-worker
 GENERATOR_API_CLIENT_SECRET=<client secret>
 ```
+
+The Keycloak token endpoint is environment-specific. DEV uses
+`keycloak-dev.security.svc.cluster.local`, PRE uses
+`keycloak-pre.security.svc.cluster.local`, and the full token endpoint can be
+overridden through `GENERATOR_API_TOKEN_URL`.
 
 The worker obtains access tokens with `grant_type=client_credentials`, caches
 the token in memory until shortly before expiration, and retries a lifecycle

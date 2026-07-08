@@ -109,6 +109,7 @@ These safeguards are local to the worker filesystem. They improve single-node or
 - `GeneratorApiGenerationLifecycleAdapter` can PATCH status updates to `generator-api` when `app.lifecycle.http-enabled=true`
 - The `local` profile enables HTTP callbacks by default; `dev` and `pre` require explicit enablement
 - Callback configuration is supplied through `GENERATOR_API_BASE_URL`, `GENERATOR_API_LIFECYCLE_HTTP_ENABLED`, `GENERATOR_API_LIFECYCLE_STATUS_UPDATE_PATH`, `GENERATOR_API_AUTH_MODE`, `GENERATOR_API_TOKEN_URL`, `GENERATOR_API_CLIENT_ID`, `GENERATOR_API_CLIENT_SECRET`, and optional local fallback `GENERATOR_API_BEARER_TOKEN`
+- `GENERATOR_API_TOKEN_URL` selects the Keycloak token endpoint; DEV defaults to `keycloak-dev.security.svc.cluster.local`, while PRE defaults to `keycloak-pre.security.svc.cluster.local`
 - HTTP contract tests validate `GENERATING`, `GENERATED`, and `FAILED` payloads
 - `RECEIVED` and `DEPLOYMENT_REQUESTED` remain worker-local transitions and are not sent to `generator-api`
 - When HTTP lifecycle updates are disabled, the adapter logs the transition instead

@@ -44,7 +44,7 @@ spec:
             - name: GENERATOR_API_AUTH_MODE
               value: "client-credentials"
             - name: GENERATOR_API_TOKEN_URL
-              value: "http://keycloak.security.svc.cluster.local:8080/realms/scaffoldops-dev/protocol/openid-connect/token"
+              value: "http://keycloak-dev.security.svc.cluster.local:8080/realms/scaffoldops-dev/protocol/openid-connect/token"
             - name: GENERATOR_API_CLIENT_ID
               value: "scaffoldops-generator-worker"
             - name: GENERATOR_API_CLIENT_SECRET

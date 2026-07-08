@@ -254,12 +254,17 @@ They configure:
 - `GENERATOR_API_BASE_URL=http://generator-api:8081/api/generator/v1`
 - `GENERATOR_API_LIFECYCLE_HTTP_ENABLED=true`
 - `GENERATOR_API_AUTH_MODE=client-credentials`
-- `GENERATOR_API_TOKEN_URL=http://keycloak.security.svc.cluster.local:8080/realms/scaffoldops-dev/protocol/openid-connect/token`
+- `GENERATOR_API_TOKEN_URL=http://keycloak-dev.security.svc.cluster.local:8080/realms/scaffoldops-dev/protocol/openid-connect/token`
 - `GENERATOR_API_CLIENT_ID=scaffoldops-generator-worker`
 - `GENERATOR_API_CLIENT_SECRET` from secret `generator-api-worker-client`,
   key `client-secret`
 - `GENERATOR_DOCKER_BUILD_ENABLED=false`
 - generated output under `/var/lib/generator-worker`
+
+For deployed environments, Keycloak service names are environment-specific:
+DEV uses `keycloak-dev.security.svc.cluster.local`, PRE uses
+`keycloak-pre.security.svc.cluster.local`, and the full endpoint remains
+configurable through `GENERATOR_API_TOKEN_URL`.
 
 Create or update the client secret before applying the worker manifests:
 
