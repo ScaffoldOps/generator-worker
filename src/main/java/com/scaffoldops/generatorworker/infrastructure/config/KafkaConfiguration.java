@@ -3,6 +3,7 @@ package com.scaffoldops.generatorworker.infrastructure.config;
 import com.scaffoldops.generatorworker.domain.event.DeploymentRequestedEvent;
 import com.scaffoldops.generatorworker.domain.event.ArtifactCleanupRequestedEvent;
 import com.scaffoldops.generatorworker.domain.event.GenerationRequestedEvent;
+import com.scaffoldops.generatorworker.domain.event.ImageBuildRetryRequestedEvent;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
@@ -54,6 +55,32 @@ public class KafkaConfiguration {
         factory.setConsumerFactory(generationRequestedEventConsumerFactory);
         factory.setAutoStartup(kafkaProperties.getListener().isAutoStartup());
         factory.setCommonErrorHandler(generationRequestedKafkaErrorHandler);
+        return factory;
+    }
+
+    @Bean
+    ConsumerFactory<String, ImageBuildRetryRequestedEvent> imageBuildRetryRequestedEventConsumerFactory(
+            KafkaProperties kafkaProperties
+    ) {
+        Map<String, Object> properties = new HashMap<>(kafkaProperties.buildConsumerProperties());
+        properties.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        properties.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class);
+        properties.put(JsonDeserializer.TRUSTED_PACKAGES, "com.scaffoldops.generatorworker.domain.event");
+        properties.put(JsonDeserializer.VALUE_DEFAULT_TYPE, ImageBuildRetryRequestedEvent.class.getName());
+        properties.put(JsonDeserializer.USE_TYPE_INFO_HEADERS, false);
+
+        return new DefaultKafkaConsumerFactory<>(properties);
+    }
+
+    @Bean
+    ConcurrentKafkaListenerContainerFactory<String, ImageBuildRetryRequestedEvent> imageBuildRetryRequestedKafkaListenerContainerFactory(
+            ConsumerFactory<String, ImageBuildRetryRequestedEvent> imageBuildRetryRequestedEventConsumerFactory,
+            KafkaProperties kafkaProperties
+    ) {
+        ConcurrentKafkaListenerContainerFactory<String, ImageBuildRetryRequestedEvent> factory =
+                new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(imageBuildRetryRequestedEventConsumerFactory);
+        factory.setAutoStartup(kafkaProperties.getListener().isAutoStartup());
         return factory;
     }
 

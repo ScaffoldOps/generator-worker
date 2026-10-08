@@ -46,6 +46,7 @@ app:
     handoff-state-dir: ${GENERATION_HANDOFF_STATE_DIR:${java.io.tmpdir}/generator-worker/handoff}
   kafka:
     topics:
+      image-build-retry-requested: ${IMAGE_BUILD_RETRY_REQUESTED_TOPIC:image-build-retry-requested}
       generation-requested: ${GENERATION_REQUESTED_TOPIC:generation-requested}
       deployment-requested: ${DEPLOYMENT_REQUESTED_TOPIC:deployment-requested}
       generation-requested-dlt: ${GENERATION_REQUESTED_DLT_TOPIC:generation-requested-dlt}
@@ -76,3 +77,5 @@ management:
       base-path: /actuator
       exposure:
         include: health,info
+
+# Retry topic: app.kafka.topics.image-build-retry-requested (default image-build-retry-requested).

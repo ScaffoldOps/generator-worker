@@ -524,3 +524,19 @@ kubectl kustomize k8s/deployment
 Tests use fake Docker executables to check login standard input, secret
 redaction, failure diagnostics and matching build/push tags. They also validate
 the local manifest's socket mount, environment and Secret references.
+
+### Automatic image recovery
+
+The worker consumes `image-build-retry-requested` (override with
+`app.kafka.topics.image-build-retry-requested`). Payload fields: `generationRequestId`,
+`name`, `template`, `database`, `restApi`, `security`, `messaging`, `deploymentTarget`,
+`artifactRef`, `retryAttempt`, `failureStage`.
+It uses the existing filesystem project or downloads the MinIO `s3://bucket/key` ZIP
+into a temporary workspace, checks ZIP paths and extraction limits, and reuses Docker
+build/push with `app.image-builder.max-attempts` and `app.image-builder.retry-backoff-ms`.
+Temporary downloads are removed after processing. No new project or request is created.
+The callback preserves the original artifact reference and the API-reserved retry attempt.
+Only successful build and push produce `GENERATED`; failures remain `GENERATION_FAILED`.
+Scheduled attempts are owned and bounded by generator-api. Kafka redelivery may repeat
+a build using the same deterministic tag. Existing MinIO settings, Docker socket and
+Docker Hub credentials are reused; no Kubernetes changes are required.

@@ -85,7 +85,15 @@ public class ProcessGenerationRequestService implements ProcessGenerationRequest
         }
     }
 
+    public void recover(GenerationRequest request, GenerationArtifact artifact, String artifactRef, int retryAttempt) {
+        process(request, artifact, artifactRef, retryAttempt);
+    }
+
     private void process(GenerationRequest request) {
+        process(request, null, null, 0);
+    }
+
+    private void process(GenerationRequest request, GenerationArtifact existingArtifact, String existingRef, int retryAttempt) {
         log.info(
                 "Processing generation request requestId={} serviceName={} template={} deploymentTarget={} workerService=generator-worker",
                 request.requestId(),
@@ -95,22 +103,22 @@ public class ProcessGenerationRequestService implements ProcessGenerationRequest
         );
 
         String stage = "CALLBACK";
-        String artifactRef = null;
+        String artifactRef = existingRef;
         String imageRef = null;
-        int retryCount = 0;
+        int retryCount = retryAttempt;
         try {
-            transition(request, GenerationStatus.GENERATING, "generator-worker started generation processing", null, null, null, 0);
+            if (existingArtifact == null) transition(request, GenerationStatus.GENERATING, "generator-worker started generation processing", null, null, null, 0);
             stage = "ARTIFACT_GENERATION";
-            GenerationArtifact artifact = projectGenerationPort.generate(request);
+            GenerationArtifact artifact = existingArtifact != null ? existingArtifact : projectGenerationPort.generate(request);
             stage = "ARTIFACT_UPLOAD";
-            artifactRef = artifactPublisher.publish(artifact, imageBuilderPort.intendedImageReference(artifact));
+            if (existingArtifact == null) artifactRef = artifactPublisher.publish(artifact, imageBuilderPort.intendedImageReference(artifact));
             if (artifactRef == null || artifactRef.isBlank()) {
                 artifactRef = null;
                 throw new IllegalStateException("Artifact publishing returned a blank artifactRef");
             }
             stage = "IMAGE_BUILD";
             for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-                retryCount = attempt - 1;
+                retryCount = existingArtifact == null ? attempt - 1 : retryAttempt;
                 try {
                     imageRef = imageBuilderPort.build(artifact);
                     if (imageRef == null || imageRef.isBlank()) {
@@ -138,10 +146,16 @@ public class ProcessGenerationRequestService implements ProcessGenerationRequest
             stage = "CALLBACK";
             transition(request, GenerationStatus.GENERATED, "Generation completed successfully", artifactRef, imageRef, null, retryCount);
         } catch (RuntimeException exception) {
+            if (existingArtifact != null && "CALLBACK".equals(stage)) {
+                throw exception;
+            }
             try {
                 transition(request, GenerationStatus.GENERATION_FAILED, exception.getMessage(), artifactRef, null, stage, retryCount);
             } catch (RuntimeException callbackFailure) {
                 exception.addSuppressed(callbackFailure);
+            }
+            if (existingArtifact != null && exception.getSuppressed().length == 0) {
+                return; // API scheduler owns subsequent technical recovery attempts.
             }
             throw exception;
         }
