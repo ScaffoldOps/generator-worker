@@ -2,6 +2,7 @@ package com.scaffoldops.generatorworker.infrastructure.image;
 
 import com.scaffoldops.generatorworker.application.port.out.ImageBuilderPort;
 import com.scaffoldops.generatorworker.domain.model.GenerationArtifact;
+import com.scaffoldops.generatorworker.domain.model.ImageGenerationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -9,6 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -30,21 +32,33 @@ public class DockerImageBuilderAdapter implements ImageBuilderPort {
         this(buildEnabled, dockerCommand, false, "", "scaffoldops");
     }
 
+    private final String dockerUsername;
+    private final String dockerPassword;
+
+    public DockerImageBuilderAdapter(boolean buildEnabled, String dockerCommand, boolean pushEnabled,
+            String registry, String repositoryPrefix) {
+        this(buildEnabled, dockerCommand, pushEnabled, registry, repositoryPrefix, "", "");
+    }
+
     @Autowired
     public DockerImageBuilderAdapter(
             @Value("${app.image-builder.build-enabled:true}") boolean buildEnabled,
             @Value("${app.image-builder.docker-command:docker}") String dockerCommand,
-            @Value("${app.image-builder.push-enabled:false}") boolean pushEnabled,
-            @Value("${app.image-builder.registry:}") String registry,
-            @Value("${app.image-builder.repository-prefix:scaffoldops}") String repositoryPrefix
+            @Value("${app.image-builder.push-enabled:true}") boolean pushEnabled,
+            @Value("${app.image-builder.registry:docker.io}") String registry,
+            @Value("${app.image-builder.repository-prefix:victodomvar/scaffoldops-generated}") String repositoryPrefix,
+            @Value("${app.image-builder.username:}") String dockerUsername,
+            @Value("${app.image-builder.password:}") String dockerPassword
     ) {
+        this.dockerUsername = dockerUsername;
+        this.dockerPassword = dockerPassword;
         this.buildEnabled = buildEnabled;
         this.dockerCommand = dockerCommand;
         this.pushEnabled = pushEnabled;
         this.registry = registry.replaceAll("/+$", "");
         this.repositoryPrefix = repositoryPrefix.replaceAll("^/+|/+$", "");
-        if (pushEnabled && (!buildEnabled || this.registry.isBlank())) {
-            throw new IllegalArgumentException("Docker push requires build enabled and an image registry");
+        if (pushEnabled && this.registry.isBlank()) {
+            throw new IllegalArgumentException("Docker image push requires a configured registry; cannot complete generation");
         }
     }
 
@@ -54,23 +68,35 @@ public class DockerImageBuilderAdapter implements ImageBuilderPort {
             return null;
         }
         String repository = repositoryPrefix.isBlank() ? artifact.serviceName()
-                : repositoryPrefix + "/" + artifact.serviceName();
-        return (registry.isBlank() ? "" : registry + "/") + repository + ":" + artifact.requestId();
+                : repositoryPrefix;
+        return (registry.isBlank() ? "" : registry + "/") + repository + ":" + artifact.serviceName() + "-" + artifact.requestId();
     }
 
     @Override
     public String build(GenerationArtifact artifact) {
-        Path projectDirectory = projectDirectory(artifact);
         if (!buildEnabled) {
-            log.info(
-                    "Skipping generated Docker image build because image builder is disabled requestId={} imageName={} projectDirectory={} workerService=generator-worker",
-                    artifact.requestId(),
-                    artifact.imageName(),
-                    projectDirectory
-            );
-            return null;
+            throw new ImageGenerationException("IMAGE_BUILD",
+                    "Docker image build is disabled; cannot complete generation", null, false);
         }
+        if (!pushEnabled) {
+            throw new ImageGenerationException("IMAGE_PUSH",
+                    "Docker image push is disabled; cannot complete generation", null, false);
+        }
+        if (dockerUsername == null || dockerUsername.isBlank() || dockerPassword == null || dockerPassword.isBlank()) {
+            throw new ImageGenerationException("IMAGE_PUSH",
+                    "Docker push requires DOCKER_USERNAME and DOCKER_PASSWORD (Docker Hub access token)", null, false);
+        }
+        try {
+            return buildAndPush(artifact);
+        } catch (ImageGenerationException exception) {
+            throw exception;
+        } catch (RuntimeException exception) {
+            throw new ImageGenerationException("IMAGE_BUILD", exception.getMessage(), exception, true);
+        }
+    }
 
+    private String buildAndPush(GenerationArtifact artifact) {
+        Path projectDirectory = projectDirectory(artifact);
         String imageRef = intendedImageReference(artifact);
         List<String> command = List.of(
                 dockerCommand,
@@ -106,7 +132,7 @@ public class DockerImageBuilderAdapter implements ImageBuilderPort {
                 throw new IllegalStateException(
                         "docker build failed for image=" + artifact.imageName()
                                 + " exitCode=" + exitCode
-                                + " output=" + output.trim()
+                                + " output=" + redact(output.trim())
                 );
             }
             log.info(
@@ -114,8 +140,11 @@ public class DockerImageBuilderAdapter implements ImageBuilderPort {
                     artifact.requestId(),
                     artifact.imageName()
             );
-            if (pushEnabled) {
+            try {
+                login();
                 push(imageRef);
+            } catch (RuntimeException exception) {
+                throw new ImageGenerationException("IMAGE_PUSH", exception.getMessage(), exception, true);
             }
             return imageRef;
         } catch (InterruptedException exception) {
@@ -132,6 +161,32 @@ public class DockerImageBuilderAdapter implements ImageBuilderPort {
         }
     }
 
+    private void login() {
+        try {
+            Process process = new ProcessBuilder(dockerCommand, "login", registry,
+                    "--username", dockerUsername, "--password-stdin")
+                    .redirectErrorStream(true).start();
+            try (var input = process.getOutputStream()) {
+                input.write((dockerPassword + "\n").getBytes(StandardCharsets.UTF_8));
+            }
+            // Login output is intentionally excluded from errors and logs.
+            process.getInputStream().readAllBytes();
+            int exitCode = process.waitFor();
+            if (exitCode != 0) {
+                throw new IllegalStateException("docker login failed for registry=" + registry + " exitCode=" + exitCode);
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("docker login interrupted", exception);
+        } catch (IOException exception) {
+            throw new IllegalStateException("failed to execute docker login", exception);
+        }
+    }
+
+    private String redact(String output) {
+        return dockerPassword == null || dockerPassword.isEmpty() ? output : output.replace(dockerPassword, "[REDACTED]");
+    }
+
     private void push(String imageRef) {
         try {
             Process process = new ProcessBuilder(dockerCommand, "push", imageRef)
@@ -140,7 +195,7 @@ public class DockerImageBuilderAdapter implements ImageBuilderPort {
             int exitCode = process.waitFor();
             if (exitCode != 0) {
                 throw new IllegalStateException("docker push failed for image=" + imageRef
-                        + " exitCode=" + exitCode + " output=" + output.trim());
+                        + " exitCode=" + exitCode + " output=" + redact(output.trim()));
             }
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();

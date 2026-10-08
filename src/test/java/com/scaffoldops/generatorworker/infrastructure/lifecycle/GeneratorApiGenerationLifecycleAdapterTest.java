@@ -59,7 +59,7 @@ class GeneratorApiGenerationLifecycleAdapterTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"GENERATING", "GENERATED", "FAILED"})
+    @ValueSource(strings = {"GENERATING", "GENERATED", "GENERATION_FAILED"})
     void shouldPatchSupportedLifecycleStatusWhenLifecycleHttpIsEnabled(String status) {
         RestTemplate restTemplate = new RestTemplate();
         MockRestServiceServer server = MockRestServiceServer.bindTo(restTemplate).build();
@@ -217,6 +217,25 @@ class GeneratorApiGenerationLifecycleAdapterTest {
                 );
 
         org.assertj.core.api.Assertions.assertThat(provider.accessToken()).contains("local-service-token");
+    }
+
+    @Test
+    void shouldSendFailureDiagnosticsAndNormalReferenceValues() {
+        RestTemplate client = new RestTemplate();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(client).build();
+        var update = new GenerationLifecycleUpdate(UUID.randomUUID(), "GENERATION_FAILED",
+                "Docker push failed after 3 attempts", "s3://artifacts/billing.zip", null, "IMAGE_PUSH", 2);
+        server.expect(requestTo("http://generator-api-service/internal/generation-requests/" + update.requestId() + "/generation-status"))
+                .andExpect(method(HttpMethod.PATCH))
+                .andExpect(jsonPath("$.generationStatus").value("GENERATION_FAILED"))
+                .andExpect(jsonPath("$.artifactRef").value(update.artifactRef()))
+                .andExpect(jsonPath("$.imageRef").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.failureStage").value("IMAGE_PUSH"))
+                .andExpect(jsonPath("$.retryCount").value(2))
+                .andRespond(withSuccess());
+        new GeneratorApiGenerationLifecycleAdapter(client, "http://generator-api-service",
+                "/internal/generation-requests/{requestId}/generation-status", true, "").updateStatus(update);
+        server.verify();
     }
 
     private GenerationLifecycleUpdate update(String status) {

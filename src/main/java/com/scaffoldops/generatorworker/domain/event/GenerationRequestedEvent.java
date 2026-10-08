@@ -1,5 +1,7 @@
 package com.scaffoldops.generatorworker.domain.event;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
+
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
@@ -12,7 +14,7 @@ public record GenerationRequestedEvent(
         Boolean security,
         Boolean messaging,
         String deploymentTarget,
-        String status,
+        @JsonAlias("status") String generationStatus,
         OffsetDateTime createdAt
 ) {
 }

@@ -32,10 +32,14 @@ app:
       secret-key: ${GENERATOR_MINIO_SECRET_KEY:minioadmin}
       bucket: ${GENERATOR_MINIO_BUCKET:scaffoldops-artifacts}
   image-builder:
-    push-enabled: ${GENERATOR_DOCKER_PUSH_ENABLED:false}
-    registry: ${GENERATOR_IMAGE_REGISTRY:}
-    repository-prefix: ${GENERATOR_IMAGE_REPOSITORY_PREFIX:scaffoldops}
+    username: ${DOCKER_USERNAME:}
+    password: ${DOCKER_PASSWORD:}
+    push-enabled: ${GENERATOR_DOCKER_PUSH_ENABLED:true}
+    registry: ${GENERATOR_IMAGE_REGISTRY:docker.io}
+    repository-prefix: ${GENERATOR_IMAGE_REPOSITORY_PREFIX:victodomvar/scaffoldops-generated}
     build-enabled: ${GENERATOR_DOCKER_BUILD_ENABLED:true}
+    max-attempts: ${GENERATOR_IMAGE_MAX_ATTEMPTS:3}
+    retry-backoff-ms: ${GENERATOR_IMAGE_RETRY_BACKOFF_MS:1000}
     docker-command: ${DOCKER_COMMAND:docker}
   generation:
     manifest-output-dir: ${GENERATION_MANIFEST_OUTPUT_DIR:${java.io.tmpdir}/generator-worker/manifests}

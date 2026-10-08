@@ -23,7 +23,7 @@ import java.util.Set;
 public class GeneratorApiGenerationLifecycleAdapter implements GenerationLifecyclePort {
 
     private static final Logger log = LoggerFactory.getLogger(GeneratorApiGenerationLifecycleAdapter.class);
-    private static final Set<String> HTTP_CALLBACK_STATUSES = Set.of("GENERATING", "GENERATED", "FAILED");
+    private static final Set<String> HTTP_CALLBACK_STATUSES = Set.of("GENERATING", "GENERATED", "GENERATION_FAILED");
 
     private final RestTemplate restTemplate;
     private final String lifecycleBaseUrl;
@@ -163,7 +163,9 @@ public class GeneratorApiGenerationLifecycleAdapter implements GenerationLifecyc
                 update.status(),
                 update.message(),
                 update.artifactRef(),
-                update.imageRef()
+                update.imageRef(),
+                update.failureStage(),
+                update.retryCount()
         );
     }
 
@@ -171,7 +173,9 @@ public class GeneratorApiGenerationLifecycleAdapter implements GenerationLifecyc
             String generationStatus,
             String message,
             String artifactRef,
-            String imageRef
+            String imageRef,
+            String failureStage,
+            int retryCount
     ) {
     }
 }

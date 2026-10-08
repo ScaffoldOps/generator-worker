@@ -32,7 +32,7 @@ class GenerationRequestedKafkaListenerTest {
         assertThat(useCase.command.security()).isEqualTo(event.security());
         assertThat(useCase.command.messaging()).isEqualTo(event.messaging());
         assertThat(useCase.command.deploymentTarget()).isEqualTo(event.deploymentTarget());
-        assertThat(useCase.command.status()).isEqualTo(event.status());
+        assertThat(useCase.command.status()).isEqualTo(event.generationStatus());
         assertThat(useCase.command.createdAt()).isEqualTo(event.createdAt());
     }
 
@@ -51,7 +51,7 @@ class GenerationRequestedKafkaListenerTest {
                 true,
                 false,
                 "kubernetes",
-                "REQUESTED",
+                "RECEIVED",
                 OffsetDateTime.now()
         );
 
@@ -60,6 +60,46 @@ class GenerationRequestedKafkaListenerTest {
                 .hasMessage("generation-requested event missing required field: requestId");
 
         assertThat(useCase.command).isNull();
+    }
+
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"status", "generationStatus"})
+    void shouldDeserializeAndProcessApiPayload(String statusField) throws Exception {
+        RecordingUseCase useCase = new RecordingUseCase();
+        GenerationRequestedKafkaListener listener =
+                new GenerationRequestedKafkaListener(useCase, kafkaTopicProperties());
+        try (var fixture = getClass().getResourceAsStream("/contracts/generation-requested.json");
+             var deserializer = new org.springframework.kafka.support.serializer.JsonDeserializer<>(
+                     GenerationRequestedEvent.class, false)) {
+            String payload = new String(fixture.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)
+                    .replace("\"generationStatus\"", "\"" + statusField + "\"");
+            GenerationRequestedEvent event = deserializer.deserialize("generation-requested",
+                    payload.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            listener.onMessage(event);
+            assertThat(useCase.command).isNotNull();
+            assertThat(useCase.command.status()).isEqualTo("RECEIVED");
+            assertThat(useCase.command.requestId()).isEqualTo(
+                    UUID.fromString("11111111-1111-1111-1111-111111111111"));
+            assertThat(useCase.command.deploymentTarget()).isEqualTo("KUBERNETES");
+            assertThat(useCase.command.createdAt()).isEqualTo(
+                    OffsetDateTime.parse("2026-03-07T10:15:30Z"));
+        }
+    }
+
+    @Test
+    void shouldRejectPayloadWithoutEitherStatusField() throws Exception {
+        RecordingUseCase useCase = new RecordingUseCase();
+        var listener = new GenerationRequestedKafkaListener(useCase, kafkaTopicProperties());
+        var mapper = org.springframework.kafka.support.JacksonUtils.enhancedObjectMapper();
+        try (var fixture = getClass().getResourceAsStream("/contracts/generation-requested.json")) {
+            var payload = (com.fasterxml.jackson.databind.node.ObjectNode) mapper.readTree(fixture);
+            payload.remove("generationStatus");
+            var event = mapper.treeToValue(payload, GenerationRequestedEvent.class);
+            assertThatThrownBy(() -> listener.onMessage(event))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("generation-requested event missing required field: generationStatus");
+            assertThat(useCase.command).isNull();
+        }
     }
 
     private GenerationRequestedEvent validEvent() {
@@ -72,7 +112,7 @@ class GenerationRequestedKafkaListenerTest {
                 true,
                 false,
                 "kubernetes",
-                "REQUESTED",
+                "RECEIVED",
                 OffsetDateTime.parse("2026-03-24T12:00:00Z")
         );
     }

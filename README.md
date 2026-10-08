@@ -17,9 +17,9 @@ In `dev`, Kafka defaults to `kafka.scaffoldops-dev.svc.cluster.local:9092`.
 3. The listener validates required fields and logs receipt with `requestId` and requested service name.
 4. The service reports `GENERATING` and generates a Spring Boot project in its filesystem workspace.
 5. `ArtifactPublisher` finalizes `generation-manifest.json` with the intended artifact and image references. In MinIO mode, it creates a ZIP containing the project files at the archive root and uploads `<requestId>/project.zip`.
-6. `ImageBuilderPort` builds the image from the local workspace when enabled, then pushes the same image reference when push is enabled.
-7. The worker reports `GENERATED` with `artifactRef` and `imageRef` after every configured step succeeds. With Docker build disabled, `imageRef` is null.
-8. Generation, packaging/upload, build, or push failures report `FAILED` and propagate for Kafka retry. The worker no longer publishes deployment requests.
+6. `ImageBuilderPort` builds the image from the local workspace and pushes the same configured registry image reference.
+7. The worker reports `GENERATED` with `artifactRef` and `imageRef` only after artifact publication and image build/push succeed with both references nonblank.
+8. Generation, packaging/upload, build, or push failures report `GENERATION_FAILED` and propagate for Kafka retry. The worker no longer publishes deployment requests.
 
 ## Artifact cleanup flow
 
@@ -79,7 +79,7 @@ The worker expects JSON compatible with `GenerationRequestedEvent`:
   "security": true,
   "messaging": false,
   "deploymentTarget": "kubernetes",
-  "status": "REQUESTED",
+  "generationStatus": "RECEIVED",
   "createdAt": "2026-03-24T10:15:30Z"
 }
 ```
@@ -94,7 +94,7 @@ Required fields currently validated by the Kafka adapter:
 - `security`
 - `messaging`
 - `deploymentTarget`
-- `status`
+- `generationStatus` (legacy `status` is accepted)
 - `createdAt`
 
 ## Configuration
@@ -145,9 +145,13 @@ Profile overrides:
 | `GENERATOR_MINIO_SECRET_KEY` | `minioadmin` | Local development credential |
 | `GENERATOR_MINIO_BUCKET` | `scaffoldops-artifacts` | Pre-existing artifact bucket |
 | `GENERATOR_DOCKER_BUILD_ENABLED` | `true` | Build generated images |
-| `GENERATOR_DOCKER_PUSH_ENABLED` | `false` | Push after successful build |
-| `GENERATOR_IMAGE_REGISTRY` | empty | Registry host, optionally including port; no URL scheme |
-| `GENERATOR_IMAGE_REPOSITORY_PREFIX` | `scaffoldops` | Repository path prefix |
+| `GENERATOR_DOCKER_PUSH_ENABLED` | `true` | Push after successful build |
+| `GENERATOR_IMAGE_REGISTRY` | `docker.io` | Registry host, optionally including port; no URL scheme |
+| `GENERATOR_IMAGE_REPOSITORY_PREFIX` | `victodomvar/scaffoldops-generated` | Repository path |
+| `GENERATOR_IMAGE_MAX_ATTEMPTS` | `3` | Maximum total build/push attempts |
+| `GENERATOR_IMAGE_RETRY_BACKOFF_MS` | `1000` | Fixed delay between image attempts |
+| `DOCKER_USERNAME` | empty | Docker Hub username from Kubernetes Secret |
+| `DOCKER_PASSWORD` | empty | Docker Hub access token from Kubernetes Secret |
 
 MinIO artifacts use `s3://<bucket>/<requestId>/project.zip`. Provision the bucket
 and grant the worker permission to upload objects before enabling MinIO mode.
@@ -156,17 +160,21 @@ succeed; the `GENERATED` callback confirms completion. Retries overwrite the
 same object key and reuse the local project workspace.
 
 For registry publishing, enable both Docker flags and configure the registry.
-The image reference is `<registry>/<prefix>/<serviceName>:<requestId>`.
+The image reference is `<registry>/<repository-prefix>:<serviceName>-<requestId>`.
 Docker must be available to the worker with a reachable daemon. Configure
-registry authentication and any insecure registry settings in the Docker
-runtime; credentials are not passed on the command line. Images are stored in
-the Docker Registry.
+credentials using `DOCKER_USERNAME` and `DOCKER_PASSWORD`. Before pushing, the
+worker runs `docker login docker.io --username <username> --password-stdin`; the
+token is sent through standard input and excluded from command arguments and
+login logs. Missing credentials fail with `failureStage=IMAGE_PUSH`. Login and
+push failures participate in the existing image retry policy. Images are stored
+in the configured registry.
 
 The Kubernetes manifest enables MinIO storage at `http://minio:9000` and reads
 credentials from Secret `generator-worker-minio`, keys `access-key` and
 `secret-key`. Supply that Secret in `scaffoldops-dev` and adjust the endpoint to
-your installation. Docker build and push remain disabled in this manifest;
-enable both once a Docker runtime and reachable registry are provisioned.
+your installation. This local Minikube manifest enables Docker build and push,
+mounts the node Docker socket, and reads Docker Hub credentials from the separate
+`docker-hub-credentials` Secret.
 The existing PVC holds working directories; ZIP temporary files are removed
 after upload, including on failure.
 
@@ -201,9 +209,9 @@ GENERATOR_API_BEARER_TOKEN="$TOKEN" \
 ```
 
 The callback uses HTTP `PATCH` and sends `generationStatus`, `message`, `artifactRef`,
-and `imageRef`. `artifactRef` and `imageRef` are populated for `GENERATED`,
-after the Docker image build succeeds. Only `GENERATING`, `GENERATED`, and
-`FAILED` are sent over HTTP; worker-internal transitions such as `RECEIVED`
+`imageRef`, `failureStage`, and `retryCount`. `artifactRef` and `imageRef` are populated for `GENERATED`,
+after Docker image build and registry push succeed. Only `GENERATING`, `GENERATED`, and
+`GENERATION_FAILED` are sent over HTTP; worker-internal transitions such as `RECEIVED`
 are not sent.
 
 For Kubernetes, worker-to-api communication uses Keycloak client credentials.
@@ -399,3 +407,120 @@ The deployment exposes env vars for:
 ## Notes
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the current worker boundaries.
+
+The canonical `generation-requested` lifecycle field is `generationStatus`, matching callbacks. The worker
+also accepts legacy event `status` during migration.
+Deploy this compatible worker before changing the API publisher. Missing generationStatus
+is still rejected. The contract fixture in
+`src/test/resources/contracts/generation-requested.json` is also verified by the
+API publisher test and is deserialized with the Kafka JSON deserializer here.
+
+## MVP generation lifecycle
+
+`RECEIVED -> GENERATING -> GENERATED`, or
+`RECEIVED -> GENERATING -> GENERATION_FAILED`. GENERATED means the artifact and
+Docker image are both produced and published; artifactRef and imageRef are
+nonblank. Deployment is a separate API action after GENERATED.
+
+Image failures retry internally (three attempts by default); they reuse the
+artifact and workspace. After exhaustion, the worker reports GENERATION_FAILED,
+retains artifactRef, and clears imageRef. Disabled build or push fails with a
+clear message and is not retried. A configured repository such as
+`victodomvar/scaffoldops-generated` produces
+`docker.io/victodomvar/scaffoldops-generated:<serviceName>-<requestId>`.
+The worker authenticates using the configured Docker Hub username and access token.
+
+Diagnostic failureStage values are ARTIFACT_GENERATION, ARTIFACT_UPLOAD,
+IMAGE_BUILD, IMAGE_PUSH, CALLBACK, and UNKNOWN. retryCount counts additional
+image attempts: zero on first-attempt success, two after three failed attempts.
+Callback errors propagate to Kafka recovery; when the API is unavailable, a
+failure callback may also be unavailable. Keep lifecycle HTTP enabled for MVP
+requests to update their persisted status. Diagnostics do not add lifecycle states.
+
+## Local Minikube Docker socket MVP
+
+`k8s/deployment` is scoped to `scaffoldops-dev` and is a local Minikube MVP
+manifest. It mounts a `hostPath` of `/var/run/docker.sock` with `type: Socket` at
+the same path inside the worker. This is the **Minikube node's** Docker socket,
+which may differ from your workstation socket. The node must run a Docker daemon;
+a containerd-only node does not provide this socket. For a new local profile,
+use `minikube start --driver=docker --container-runtime=docker`. Check an existing
+node before deploying:
+
+```bash
+minikube ssh -- 'test -S /var/run/docker.sock && sudo docker info >/dev/null'
+```
+
+The worker Dockerfile includes the Docker CLI; the mounted socket supplies the
+daemon. Docker build sends the project context from the worker's PVC to that
+daemon. The manifest sets:
+
+```text
+GENERATOR_DOCKER_BUILD_ENABLED=true
+GENERATOR_DOCKER_PUSH_ENABLED=true
+GENERATOR_IMAGE_REGISTRY=docker.io
+GENERATOR_IMAGE_REPOSITORY_PREFIX=victodomvar/scaffoldops-generated
+DOCKER_COMMAND=docker
+DOCKER_USERNAME=<from docker-hub-credentials Secret>
+DOCKER_PASSWORD=<Docker Hub access token from the same Secret>
+```
+
+Create a Docker Hub access token with permission to push to
+`victodomvar/scaffoldops-generated`, then create the Secret locally:
+
+```bash
+kubectl -n scaffoldops-dev create secret generic docker-hub-credentials \
+  --from-literal=DOCKER_USERNAME=victodomvar \
+  --from-literal=DOCKER_PASSWORD='<docker-hub-token>'
+```
+
+An alternative placeholder template is
+`k8s/examples/docker-hub-credentials.yaml`. It is excluded from Kustomize so
+placeholder credentials are not deployed automatically. Never commit actual
+credentials. Missing Secret keys prevent pod startup; missing or blank credential
+values at runtime report GENERATION_FAILED with IMAGE_PUSH diagnostics.
+
+Rebuild the worker image to include the Docker CLI and login changes, then deploy
+it. For a local image that does not require publishing the worker itself:
+
+```bash
+mvn clean package -DskipTests
+docker build -t victodomvar/scaffoldops-generator-worker:local-mvp .
+minikube image load victodomvar/scaffoldops-generator-worker:local-mvp
+kubectl apply -k k8s/deployment
+kubectl -n scaffoldops-dev set image deployment/generator-worker \
+  generator-worker=victodomvar/scaffoldops-generator-worker:local-mvp
+kubectl -n scaffoldops-dev patch deployment generator-worker --type=strategic \
+  -p '{"spec":{"template":{"spec":{"containers":[{"name":"generator-worker","imagePullPolicy":"IfNotPresent"}]}}}}'
+kubectl -n scaffoldops-dev rollout status deployment/generator-worker
+```
+
+After replacing credential values, restart the deployment so environment values
+are refreshed: `kubectl -n scaffoldops-dev rollout restart deployment/generator-worker`.
+Prerequisites from the rest of this README still apply: Kafka, MinIO, API
+callbacks and their Secrets must be configured. Real Docker Hub publishing
+requires the local Docker Hub Secret and the redeployed worker.
+
+The exact built tag, pushed tag and persisted API imageRef are
+`docker.io/victodomvar/scaffoldops-generated:<serviceName>-<requestId>`.
+GENERATED still requires both nonblank artifactRef and imageRef after upload,
+build, login and push succeed. Exhausted image failures preserve artifactRef,
+clear imageRef and report GENERATION_FAILED.
+
+**Security: this socket mount is for local development/MVP only and is not
+production-safe.** Access to the Docker socket grants control over the node,
+including the ability to start privileged containers and access node files. The
+CLI also stores registry login credentials in its container Docker config. Do
+not copy this socket mount into pre/production workloads. Future alternatives
+include Kaniko, isolated/rootless BuildKit builders, or Jib for Java images.
+
+Validation:
+
+```bash
+mvn clean test
+kubectl kustomize k8s/deployment
+```
+
+Tests use fake Docker executables to check login standard input, secret
+redaction, failure diagnostics and matching build/push tags. They also validate
+the local manifest's socket mount, environment and Secret references.

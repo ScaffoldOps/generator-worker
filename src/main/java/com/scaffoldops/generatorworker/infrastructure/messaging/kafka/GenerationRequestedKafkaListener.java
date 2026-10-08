@@ -53,7 +53,7 @@ public class GenerationRequestedKafkaListener {
                     event.security(),
                     event.messaging(),
                     event.deploymentTarget(),
-                    event.status(),
+                    event.generationStatus(),
                     event.createdAt()
             ));
         } catch (RuntimeException exception) {
@@ -79,7 +79,7 @@ public class GenerationRequestedKafkaListener {
         require(event.security() != null, "security");
         require(event.messaging() != null, "messaging");
         require(StringUtils.hasText(event.deploymentTarget()), "deploymentTarget");
-        require(StringUtils.hasText(event.status()), "status");
+        require(StringUtils.hasText(event.generationStatus()), "generationStatus");
         require(event.createdAt() != null, "createdAt");
     }
 

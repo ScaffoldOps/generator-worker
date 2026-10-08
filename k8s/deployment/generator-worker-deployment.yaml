@@ -1,3 +1,4 @@
+# Local Minikube MVP only: Docker socket access grants control of the node.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -14,6 +15,10 @@ spec:
         app: generator-worker
     spec:
       volumes:
+        - name: docker-socket
+          hostPath:
+            path: /var/run/docker.sock
+            type: Socket
         - name: generator-worker-data
           persistentVolumeClaim:
             claimName: generator-worker-artifacts-pvc
@@ -24,6 +29,8 @@ spec:
           ports:
             - containerPort: 8080
           volumeMounts:
+            - name: docker-socket
+              mountPath: /var/run/docker.sock
             - name: generator-worker-data
               mountPath: /var/lib/generator-worker
           env:
@@ -73,15 +80,25 @@ spec:
                   name: generator-worker-minio
                   key: secret-key
             - name: GENERATOR_IMAGE_REGISTRY
-              value: "registry.local"
+              value: "docker.io"
             - name: GENERATOR_IMAGE_REPOSITORY_PREFIX
-              value: "scaffoldops-generated"
+              value: "victodomvar/scaffoldops-generated"
             - name: GENERATOR_DOCKER_PUSH_ENABLED
-              value: "false"
+              value: "true"
+            - name: DOCKER_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: docker-hub-credentials
+                  key: DOCKER_USERNAME
+            - name: DOCKER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: docker-hub-credentials
+                  key: DOCKER_PASSWORD
             - name: DOCKER_COMMAND
               value: "docker"
             - name: GENERATOR_DOCKER_BUILD_ENABLED
-              value: "false"
+              value: "true"
           readinessProbe:
             tcpSocket:
               port: 8080

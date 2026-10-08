@@ -8,9 +8,13 @@ import com.scaffoldops.generatorworker.application.port.out.ProjectGenerationPor
 import com.scaffoldops.generatorworker.domain.model.GenerationArtifact;
 import com.scaffoldops.generatorworker.domain.model.GenerationLifecycleUpdate;
 import com.scaffoldops.generatorworker.domain.model.GenerationRequest;
+import com.scaffoldops.generatorworker.domain.model.GenerationStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import com.scaffoldops.generatorworker.domain.model.ImageGenerationException;
 
 
 @Service
@@ -23,16 +27,32 @@ public class ProcessGenerationRequestService implements ProcessGenerationRequest
     private final ImageBuilderPort imageBuilderPort;
     private final ProjectGenerationPort projectGenerationPort;
 
+    private final int maxAttempts;
+    private final long backoffMillis;
+
+    public ProcessGenerationRequestService(ArtifactPublisher publisher, GenerationLifecyclePort lifecycle,
+            ImageBuilderPort builder, ProjectGenerationPort generator) {
+        this(publisher, lifecycle, builder, generator, 3, 0);
+    }
+
+    @Autowired
     public ProcessGenerationRequestService(
             ArtifactPublisher artifactPublisher,
             GenerationLifecyclePort generationLifecyclePort,
             ImageBuilderPort imageBuilderPort,
-            ProjectGenerationPort projectGenerationPort
+            ProjectGenerationPort projectGenerationPort,
+            @Value("${app.image-builder.max-attempts:3}") int maxAttempts,
+            @Value("${app.image-builder.retry-backoff-ms:1000}") long backoffMillis
     ) {
         this.artifactPublisher = artifactPublisher;
         this.generationLifecyclePort = generationLifecyclePort;
         this.imageBuilderPort = imageBuilderPort;
         this.projectGenerationPort = projectGenerationPort;
+        if (maxAttempts < 1 || backoffMillis < 0) {
+            throw new IllegalArgumentException("Image retry max attempts must be positive and backoff nonnegative");
+        }
+        this.maxAttempts = maxAttempts;
+        this.backoffMillis = backoffMillis;
     }
 
     @Override
@@ -74,84 +94,62 @@ public class ProcessGenerationRequestService implements ProcessGenerationRequest
                 request.deploymentTarget()
         );
 
-        transition(request, "RECEIVED", "generator-worker received the generation request from Kafka", null, null);
-        transition(request, "GENERATING", "generator-worker started generation processing", null, null);
-
-        GenerationArtifact artifact;
+        String stage = "CALLBACK";
+        String artifactRef = null;
+        String imageRef = null;
+        int retryCount = 0;
         try {
-            artifact = projectGenerationPort.generate(request);
-        } catch (RuntimeException exception) {
-            transition(
-                    request,
-                    "FAILED",
-                    "generator-worker generation stage failed: " + exception.getMessage(),
-                    null,
-                    null
-            );
-            log.error(
-                    "Generation stage failed requestId={} serviceName={} workerService=generator-worker",
-                    request.requestId(),
-                    request.name(),
-                    exception
-            );
-            throw exception;
-        }
-
-        String artifactRef;
-        try {
+            transition(request, GenerationStatus.GENERATING, "generator-worker started generation processing", null, null, null, 0);
+            stage = "ARTIFACT_GENERATION";
+            GenerationArtifact artifact = projectGenerationPort.generate(request);
+            stage = "ARTIFACT_UPLOAD";
             artifactRef = artifactPublisher.publish(artifact, imageBuilderPort.intendedImageReference(artifact));
+            if (artifactRef == null || artifactRef.isBlank()) {
+                artifactRef = null;
+                throw new IllegalStateException("Artifact publishing returned a blank artifactRef");
+            }
+            stage = "IMAGE_BUILD";
+            for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+                retryCount = attempt - 1;
+                try {
+                    imageRef = imageBuilderPort.build(artifact);
+                    if (imageRef == null || imageRef.isBlank()) {
+                        throw new ImageGenerationException("IMAGE_BUILD",
+                                "Docker image build returned a blank imageRef; cannot complete generation", null, false);
+                    }
+                    break;
+                } catch (RuntimeException exception) {
+                    stage = exception instanceof ImageGenerationException imageFailure
+                            ? imageFailure.failureStage() : "IMAGE_BUILD";
+                    boolean retryable = !(exception instanceof ImageGenerationException imageFailure)
+                            || imageFailure.retryable();
+                    if (!retryable || attempt == maxAttempts || Thread.currentThread().isInterrupted()) {
+                        throw new IllegalStateException("Docker image generation failed after " + attempt
+                                + " attempt(s): " + exception.getMessage(), exception);
+                    }
+                    try {
+                        Thread.sleep(backoffMillis);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException("Docker image retry interrupted", interrupted);
+                    }
+                }
+            }
+            stage = "CALLBACK";
+            transition(request, GenerationStatus.GENERATED, "Generation completed successfully", artifactRef, imageRef, null, retryCount);
         } catch (RuntimeException exception) {
-            transition(request, "FAILED", "generator-worker artifact publishing stage failed: " + exception.getMessage(), null, null);
+            try {
+                transition(request, GenerationStatus.GENERATION_FAILED, exception.getMessage(), artifactRef, null, stage, retryCount);
+            } catch (RuntimeException callbackFailure) {
+                exception.addSuppressed(callbackFailure);
+            }
             throw exception;
         }
-        String imageRef = buildImage(request, artifact, artifactRef);
-        String generatedMessage = imageRef == null
-                ? "generator-worker generated the project and skipped Docker image build"
-                : "Generation completed successfully";
-        transition(
-                request,
-                "GENERATED",
-                generatedMessage,
-                artifactRef,
-                imageRef
-        );
     }
 
-    private String buildImage(GenerationRequest request, GenerationArtifact artifact, String artifactRef) {
-        try {
-            return imageBuilderPort.build(artifact);
-        } catch (RuntimeException exception) {
-            transition(
-                    request,
-                    "FAILED",
-                    "generator-worker image build/push stage failed: " + exception.getMessage(),
-                    artifactRef,
-                    null
-            );
-            log.error(
-                    "Image build stage failed requestId={} serviceName={} imageName={} workerService=generator-worker",
-                    request.requestId(),
-                    request.name(),
-                    artifact.imageName(),
-                    exception
-            );
-            throw exception;
-        }
-    }
-
-    private void transition(
-            GenerationRequest request,
-            String status,
-            String message,
-            String artifactRef,
-            String imageRef
-    ) {
-        generationLifecyclePort.updateStatus(new GenerationLifecycleUpdate(
-                request.requestId(),
-                status,
-                message,
-                artifactRef,
-                imageRef
-        ));
+    private void transition(GenerationRequest request, GenerationStatus status, String message,
+            String artifactRef, String imageRef, String failureStage, int retryCount) {
+        generationLifecyclePort.updateStatus(new GenerationLifecycleUpdate(request.requestId(),
+                status.name(), message, artifactRef, imageRef, failureStage, retryCount));
     }
 }
