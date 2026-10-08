@@ -1,11 +1,10 @@
 package com.scaffoldops.generatorworker.application.service;
 
 import com.scaffoldops.generatorworker.application.port.in.ProcessGenerationRequestUseCase;
-import com.scaffoldops.generatorworker.application.port.out.DeploymentRequestedPublisherPort;
+import com.scaffoldops.generatorworker.application.port.out.ArtifactPublisher;
 import com.scaffoldops.generatorworker.application.port.out.GenerationLifecyclePort;
 import com.scaffoldops.generatorworker.application.port.out.ImageBuilderPort;
 import com.scaffoldops.generatorworker.application.port.out.ProjectGenerationPort;
-import com.scaffoldops.generatorworker.domain.event.DeploymentRequestedEvent;
 import com.scaffoldops.generatorworker.domain.model.GenerationArtifact;
 import com.scaffoldops.generatorworker.domain.model.GenerationLifecycleUpdate;
 import com.scaffoldops.generatorworker.domain.model.GenerationRequest;
@@ -13,25 +12,24 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.time.OffsetDateTime;
 
 @Service
 public class ProcessGenerationRequestService implements ProcessGenerationRequestUseCase {
 
     private static final Logger log = LoggerFactory.getLogger(ProcessGenerationRequestService.class);
 
-    private final DeploymentRequestedPublisherPort deploymentRequestedPublisherPort;
+    private final ArtifactPublisher artifactPublisher;
     private final GenerationLifecyclePort generationLifecyclePort;
     private final ImageBuilderPort imageBuilderPort;
     private final ProjectGenerationPort projectGenerationPort;
 
     public ProcessGenerationRequestService(
-            DeploymentRequestedPublisherPort deploymentRequestedPublisherPort,
+            ArtifactPublisher artifactPublisher,
             GenerationLifecyclePort generationLifecyclePort,
             ImageBuilderPort imageBuilderPort,
             ProjectGenerationPort projectGenerationPort
     ) {
-        this.deploymentRequestedPublisherPort = deploymentRequestedPublisherPort;
+        this.artifactPublisher = artifactPublisher;
         this.generationLifecyclePort = generationLifecyclePort;
         this.imageBuilderPort = imageBuilderPort;
         this.projectGenerationPort = projectGenerationPort;
@@ -99,29 +97,35 @@ public class ProcessGenerationRequestService implements ProcessGenerationRequest
             throw exception;
         }
 
-        String imageRef = buildImage(request, artifact);
+        String artifactRef;
+        try {
+            artifactRef = artifactPublisher.publish(artifact, imageBuilderPort.intendedImageReference(artifact));
+        } catch (RuntimeException exception) {
+            transition(request, "FAILED", "generator-worker artifact publishing stage failed: " + exception.getMessage(), null, null);
+            throw exception;
+        }
+        String imageRef = buildImage(request, artifact, artifactRef);
         String generatedMessage = imageRef == null
                 ? "generator-worker generated the project and skipped Docker image build"
-                : "generator-worker generated the project and built the Docker image";
+                : "Generation completed successfully";
         transition(
                 request,
                 "GENERATED",
                 generatedMessage,
-                artifact.artifactReference(),
+                artifactRef,
                 imageRef
         );
-        publishDeploymentRequested(request, artifact, imageRef);
     }
 
-    private String buildImage(GenerationRequest request, GenerationArtifact artifact) {
+    private String buildImage(GenerationRequest request, GenerationArtifact artifact, String artifactRef) {
         try {
             return imageBuilderPort.build(artifact);
         } catch (RuntimeException exception) {
             transition(
                     request,
                     "FAILED",
-                    "generator-worker image build stage failed: " + exception.getMessage(),
-                    artifact.artifactReference(),
+                    "generator-worker image build/push stage failed: " + exception.getMessage(),
+                    artifactRef,
                     null
             );
             log.error(
@@ -129,43 +133,6 @@ public class ProcessGenerationRequestService implements ProcessGenerationRequest
                     request.requestId(),
                     request.name(),
                     artifact.imageName(),
-                    exception
-            );
-            throw exception;
-        }
-    }
-
-    private void publishDeploymentRequested(GenerationRequest request, GenerationArtifact artifact, String imageRef) {
-        if (imageRef == null) {
-            log.info(
-                    "Skipping deployment-requested publication because no image was built requestId={} serviceName={} artifactReference={} workerService=generator-worker",
-                    request.requestId(),
-                    request.name(),
-                    artifact.artifactReference()
-            );
-            return;
-        }
-
-        try {
-            deploymentRequestedPublisherPort.publish(new DeploymentRequestedEvent(
-                    request.requestId(),
-                    request.name(),
-                    request.deploymentTarget(),
-                    artifact.artifactReference(),
-                    OffsetDateTime.now()
-            ));
-            transition(
-                    request,
-                    "DEPLOYMENT_REQUESTED",
-                    "generator-worker published deployment-requested for artifact: " + artifact.artifactReference(),
-                    artifact.artifactReference(),
-                    imageRef
-            );
-        } catch (RuntimeException exception) {
-            log.error(
-                    "Deployment-request publication failed requestId={} serviceName={} workerService=generator-worker",
-                    request.requestId(),
-                    request.name(),
                     exception
             );
             throw exception;

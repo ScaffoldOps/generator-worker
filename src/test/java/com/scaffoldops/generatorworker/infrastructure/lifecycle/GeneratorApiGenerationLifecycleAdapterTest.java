@@ -31,7 +31,7 @@ class GeneratorApiGenerationLifecycleAdapterTest {
                 new GeneratorApiGenerationLifecycleAdapter(
                         restTemplate,
                         "http://generator-api-service",
-                        "/internal/generation-requests/{requestId}/status",
+                        "/internal/generation-requests/{requestId}/generation-status",
                         false,
                         ""
                 );
@@ -48,7 +48,7 @@ class GeneratorApiGenerationLifecycleAdapterTest {
                 new GeneratorApiGenerationLifecycleAdapter(
                         restTemplate,
                         "http://generator-api-service",
-                        "/internal/generation-requests/{requestId}/status",
+                        "/internal/generation-requests/{requestId}/generation-status",
                         true,
                         ""
                 );
@@ -65,10 +65,10 @@ class GeneratorApiGenerationLifecycleAdapterTest {
         MockRestServiceServer server = MockRestServiceServer.bindTo(restTemplate).build();
         GenerationLifecycleUpdate update = update(status);
 
-        server.expect(requestTo("http://generator-api-service/internal/generation-requests/" + update.requestId() + "/status"))
+        server.expect(requestTo("http://generator-api-service/internal/generation-requests/" + update.requestId() + "/generation-status"))
                 .andExpect(method(HttpMethod.PATCH))
                 .andExpect(content().contentType(MediaType.APPLICATION_JSON))
-                .andExpect(jsonPath("$.status").value(status))
+                .andExpect(jsonPath("$.generationStatus").value(status))
                 .andExpect(jsonPath("$.message").value(update.message()))
                 .andExpect(jsonPath("$.requestId").doesNotExist())
                 .andExpect(jsonPath("$.detail").doesNotExist())
@@ -79,7 +79,7 @@ class GeneratorApiGenerationLifecycleAdapterTest {
                 new GeneratorApiGenerationLifecycleAdapter(
                         restTemplate,
                         "http://generator-api-service",
-                        "/internal/generation-requests/{requestId}/status",
+                        "/internal/generation-requests/{requestId}/generation-status",
                         true,
                         ""
                 );
@@ -101,7 +101,7 @@ class GeneratorApiGenerationLifecycleAdapterTest {
                 "scaffoldops/billing-service:request-id"
         );
 
-        server.expect(requestTo("http://generator-api-service/internal/generation-requests/" + update.requestId() + "/status"))
+        server.expect(requestTo("http://generator-api-service/internal/generation-requests/" + update.requestId() + "/generation-status"))
                 .andExpect(method(HttpMethod.PATCH))
                 .andExpect(jsonPath("$.artifactRef").value(update.artifactRef()))
                 .andExpect(jsonPath("$.imageRef").value(update.imageRef()))
@@ -111,7 +111,7 @@ class GeneratorApiGenerationLifecycleAdapterTest {
                 new GeneratorApiGenerationLifecycleAdapter(
                         restTemplate,
                         "http://generator-api-service",
-                        "/internal/generation-requests/{requestId}/status",
+                        "/internal/generation-requests/{requestId}/generation-status",
                         true,
                         ""
                 );
@@ -127,7 +127,7 @@ class GeneratorApiGenerationLifecycleAdapterTest {
         MockRestServiceServer server = MockRestServiceServer.bindTo(restTemplate).build();
         GenerationLifecycleUpdate update = update("GENERATING");
 
-        server.expect(requestTo("http://generator-api-service/internal/generation-requests/" + update.requestId() + "/status"))
+        server.expect(requestTo("http://generator-api-service/internal/generation-requests/" + update.requestId() + "/generation-status"))
                 .andExpect(method(HttpMethod.PATCH))
                 .andExpect(header("Authorization", "Bearer local-service-token"))
                 .andRespond(withSuccess());
@@ -136,7 +136,7 @@ class GeneratorApiGenerationLifecycleAdapterTest {
                 new GeneratorApiGenerationLifecycleAdapter(
                         restTemplate,
                         "http://generator-api-service",
-                        "/internal/generation-requests/{requestId}/status",
+                        "/internal/generation-requests/{requestId}/generation-status",
                         true,
                         "local-service-token"
                 );
@@ -152,7 +152,7 @@ class GeneratorApiGenerationLifecycleAdapterTest {
         MockRestServiceServer server = MockRestServiceServer.bindTo(restTemplate).build();
         GenerationLifecycleUpdate update = update("GENERATING");
 
-        server.expect(requestTo("http://generator-api-service/internal/generation-requests/" + update.requestId() + "/status"))
+        server.expect(requestTo("http://generator-api-service/internal/generation-requests/" + update.requestId() + "/generation-status"))
                 .andExpect(method(HttpMethod.PATCH))
                 .andExpect(header("Authorization", "Bearer client-credentials-token"))
                 .andRespond(withSuccess());
@@ -161,7 +161,7 @@ class GeneratorApiGenerationLifecycleAdapterTest {
                 new GeneratorApiGenerationLifecycleAdapter(
                         restTemplate,
                         "http://generator-api-service",
-                        "/internal/generation-requests/{requestId}/status",
+                        "/internal/generation-requests/{requestId}/generation-status",
                         true,
                         new RecordingAccessTokenProvider("client-credentials-token", "client-credentials-token")
                 );
@@ -177,11 +177,11 @@ class GeneratorApiGenerationLifecycleAdapterTest {
         MockRestServiceServer server = MockRestServiceServer.bindTo(restTemplate).build();
         GenerationLifecycleUpdate update = update("GENERATING");
 
-        server.expect(requestTo("http://generator-api-service/internal/generation-requests/" + update.requestId() + "/status"))
+        server.expect(requestTo("http://generator-api-service/internal/generation-requests/" + update.requestId() + "/generation-status"))
                 .andExpect(method(HttpMethod.PATCH))
                 .andExpect(header("Authorization", "Bearer expired-token"))
                 .andRespond(withStatus(HttpStatus.UNAUTHORIZED));
-        server.expect(requestTo("http://generator-api-service/internal/generation-requests/" + update.requestId() + "/status"))
+        server.expect(requestTo("http://generator-api-service/internal/generation-requests/" + update.requestId() + "/generation-status"))
                 .andExpect(method(HttpMethod.PATCH))
                 .andExpect(header("Authorization", "Bearer refreshed-token"))
                 .andRespond(withSuccess());
@@ -192,7 +192,7 @@ class GeneratorApiGenerationLifecycleAdapterTest {
                 new GeneratorApiGenerationLifecycleAdapter(
                         restTemplate,
                         "http://generator-api-service",
-                        "/internal/generation-requests/{requestId}/status",
+                        "/internal/generation-requests/{requestId}/generation-status",
                         true,
                         accessTokenProvider
                 );

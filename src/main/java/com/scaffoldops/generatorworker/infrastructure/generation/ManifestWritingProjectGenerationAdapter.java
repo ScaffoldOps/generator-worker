@@ -7,6 +7,7 @@ import com.scaffoldops.generatorworker.domain.model.GenerationRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -28,13 +29,25 @@ public class ManifestWritingProjectGenerationAdapter implements ProjectGeneratio
     private final ObjectMapper objectMapper;
     private final Path manifestOutputDirectory;
 
+    private final String registry;
+    private final String repositoryPrefix;
+
+    public ManifestWritingProjectGenerationAdapter(ObjectMapper objectMapper, String manifestOutputDirectory) {
+        this(objectMapper, manifestOutputDirectory, "", "scaffoldops");
+    }
+
+    @Autowired
     public ManifestWritingProjectGenerationAdapter(
             ObjectMapper objectMapper,
             @Value("${app.generation.manifest-output-dir:${java.io.tmpdir}/generator-worker/manifests}")
-            String manifestOutputDirectory
+            String manifestOutputDirectory,
+            @Value("${app.image-builder.registry:}") String registry,
+            @Value("${app.image-builder.repository-prefix:scaffoldops}") String repositoryPrefix
     ) {
         this.objectMapper = objectMapper;
         this.manifestOutputDirectory = Path.of(manifestOutputDirectory);
+        this.registry = registry.replaceAll("/+$", "");
+        this.repositoryPrefix = repositoryPrefix.replaceAll("^/+|/+$", "");
     }
 
     @Override
@@ -120,7 +133,9 @@ public class ManifestWritingProjectGenerationAdapter implements ProjectGeneratio
         }
 
         String packageName = "com.scaffoldops.generated." + packageSegment;
-        String imageName = "scaffoldops/" + serviceName + ":" + request.requestId();
+        String imageName = (registry.isBlank() ? "" : registry + "/")
+                + (repositoryPrefix.isBlank() ? "" : repositoryPrefix + "/")
+                + serviceName + ":" + request.requestId();
         return new TemplateVariables(serviceName, request.requestId().toString(), packageName, imageName);
     }
 

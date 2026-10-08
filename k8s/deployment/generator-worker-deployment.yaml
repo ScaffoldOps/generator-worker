@@ -56,6 +56,28 @@ spec:
               value: "/var/lib/generator-worker/manifests"
             - name: GENERATION_HANDOFF_STATE_DIR
               value: "/var/lib/generator-worker/handoff"
+            - name: GENERATOR_ARTIFACT_STORAGE_TYPE
+              value: "minio"
+            - name: GENERATOR_MINIO_ENDPOINT
+              value: "http://minio:9000"
+            - name: GENERATOR_MINIO_BUCKET
+              value: "scaffoldops-artifacts"
+            - name: GENERATOR_MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: generator-worker-minio
+                  key: access-key
+            - name: GENERATOR_MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: generator-worker-minio
+                  key: secret-key
+            - name: GENERATOR_IMAGE_REGISTRY
+              value: "registry.local"
+            - name: GENERATOR_IMAGE_REPOSITORY_PREFIX
+              value: "scaffoldops-generated"
+            - name: GENERATOR_DOCKER_PUSH_ENABLED
+              value: "false"
             - name: DOCKER_COMMAND
               value: "docker"
             - name: GENERATOR_DOCKER_BUILD_ENABLED

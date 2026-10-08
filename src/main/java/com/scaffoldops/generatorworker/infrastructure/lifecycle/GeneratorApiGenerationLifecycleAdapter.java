@@ -34,7 +34,7 @@ public class GeneratorApiGenerationLifecycleAdapter implements GenerationLifecyc
     @Autowired
     public GeneratorApiGenerationLifecycleAdapter(
             @Value("${app.lifecycle.base-url:http://generator-api-service/api/generator/v1}") String lifecycleBaseUrl,
-            @Value("${app.lifecycle.status-update-path:/internal/generation-requests/{requestId}/status}") String lifecycleStatusUpdatePath,
+            @Value("${app.lifecycle.status-update-path:/internal/generation-requests/{requestId}/generation-status}") String lifecycleStatusUpdatePath,
             @Value("${app.lifecycle.http-enabled:false}") boolean lifecycleHttpEnabled,
             @Value("${app.lifecycle.auth.mode:client-credentials}") String lifecycleAuthMode,
             @Value("${app.lifecycle.auth.token-url:}") String lifecycleTokenUrl,
@@ -168,7 +168,7 @@ public class GeneratorApiGenerationLifecycleAdapter implements GenerationLifecyc
     }
 
     private record CallbackRequest(
-            String status,
+            String generationStatus,
             String message,
             String artifactRef,
             String imageRef

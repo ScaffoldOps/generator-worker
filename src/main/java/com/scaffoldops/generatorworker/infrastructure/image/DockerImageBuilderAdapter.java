@@ -5,6 +5,7 @@ import com.scaffoldops.generatorworker.domain.model.GenerationArtifact;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -21,12 +22,40 @@ public class DockerImageBuilderAdapter implements ImageBuilderPort {
     private final boolean buildEnabled;
     private final String dockerCommand;
 
+    private final boolean pushEnabled;
+    private final String registry;
+    private final String repositoryPrefix;
+
+    public DockerImageBuilderAdapter(boolean buildEnabled, String dockerCommand) {
+        this(buildEnabled, dockerCommand, false, "", "scaffoldops");
+    }
+
+    @Autowired
     public DockerImageBuilderAdapter(
             @Value("${app.image-builder.build-enabled:true}") boolean buildEnabled,
-            @Value("${app.image-builder.docker-command:docker}") String dockerCommand
+            @Value("${app.image-builder.docker-command:docker}") String dockerCommand,
+            @Value("${app.image-builder.push-enabled:false}") boolean pushEnabled,
+            @Value("${app.image-builder.registry:}") String registry,
+            @Value("${app.image-builder.repository-prefix:scaffoldops}") String repositoryPrefix
     ) {
         this.buildEnabled = buildEnabled;
         this.dockerCommand = dockerCommand;
+        this.pushEnabled = pushEnabled;
+        this.registry = registry.replaceAll("/+$", "");
+        this.repositoryPrefix = repositoryPrefix.replaceAll("^/+|/+$", "");
+        if (pushEnabled && (!buildEnabled || this.registry.isBlank())) {
+            throw new IllegalArgumentException("Docker push requires build enabled and an image registry");
+        }
+    }
+
+    @Override
+    public String intendedImageReference(GenerationArtifact artifact) {
+        if (!buildEnabled) {
+            return null;
+        }
+        String repository = repositoryPrefix.isBlank() ? artifact.serviceName()
+                : repositoryPrefix + "/" + artifact.serviceName();
+        return (registry.isBlank() ? "" : registry + "/") + repository + ":" + artifact.requestId();
     }
 
     @Override
@@ -42,11 +71,12 @@ public class DockerImageBuilderAdapter implements ImageBuilderPort {
             return null;
         }
 
+        String imageRef = intendedImageReference(artifact);
         List<String> command = List.of(
                 dockerCommand,
                 "build",
                 "--tag",
-                artifact.imageName(),
+                imageRef,
                 projectDirectory.toString()
         );
 
@@ -84,7 +114,10 @@ public class DockerImageBuilderAdapter implements ImageBuilderPort {
                     artifact.requestId(),
                     artifact.imageName()
             );
-            return artifact.imageName();
+            if (pushEnabled) {
+                push(imageRef);
+            }
+            return imageRef;
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException(
@@ -96,6 +129,24 @@ public class DockerImageBuilderAdapter implements ImageBuilderPort {
                     "failed to read docker build output for image=" + artifact.imageName(),
                     exception
             );
+        }
+    }
+
+    private void push(String imageRef) {
+        try {
+            Process process = new ProcessBuilder(dockerCommand, "push", imageRef)
+                    .redirectErrorStream(true).start();
+            String output = new String(process.getInputStream().readAllBytes());
+            int exitCode = process.waitFor();
+            if (exitCode != 0) {
+                throw new IllegalStateException("docker push failed for image=" + imageRef
+                        + " exitCode=" + exitCode + " output=" + output.trim());
+            }
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("docker push interrupted for image=" + imageRef, exception);
+        } catch (IOException exception) {
+            throw new IllegalStateException("failed to execute docker push for image=" + imageRef, exception);
         }
     }
 

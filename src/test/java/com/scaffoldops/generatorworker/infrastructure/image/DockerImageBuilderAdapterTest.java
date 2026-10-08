@@ -65,6 +65,36 @@ class DockerImageBuilderAdapterTest {
         assertThat(argumentsFile).doesNotExist();
     }
 
+    @Test
+    void shouldBuildAndPushTheSameRegistryReference() throws Exception {
+        Path project = generatedProject();
+        Path arguments = tempDir.resolve("push-arguments.txt");
+        Path command = executableScript("printf '%s\\n' \"$@\" >> \"" + arguments + "\"\nexit 0");
+        DockerImageBuilderAdapter adapter = new DockerImageBuilderAdapter(true, command.toString(),
+                true, "registry.local", "scaffoldops-generated");
+        String expected = "registry.local/scaffoldops-generated/billing-service:11111111-1111-1111-1111-111111111111";
+        assertThat(adapter.build(artifact(project))).isEqualTo(expected);
+        assertThat(Files.readAllLines(arguments)).containsExactly("build", "--tag", expected,
+                project.toString(), "push", expected);
+    }
+
+    @Test
+    void shouldFailWhenPushFails() throws Exception {
+        Path command = executableScript("if [ \"$1\" = push ]; then echo 'push rejected'; exit 19; fi\nexit 0");
+        DockerImageBuilderAdapter adapter = new DockerImageBuilderAdapter(true, command.toString(),
+                true, "registry.local", "scaffoldops-generated");
+        assertThatThrownBy(() -> adapter.build(artifact(generatedProject())))
+                .hasMessageContaining("docker push failed").hasMessageContaining("exitCode=19");
+    }
+
+    @Test
+    void shouldRejectPushWithoutBuildOrRegistry() {
+        assertThatThrownBy(() -> new DockerImageBuilderAdapter(false, "docker", true, "registry.local", "generated"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new DockerImageBuilderAdapter(true, "docker", true, "", "generated"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
     private Path generatedProject() throws Exception {
         Path projectDirectory = tempDir.resolve("billing-service");
         Files.createDirectories(projectDirectory);

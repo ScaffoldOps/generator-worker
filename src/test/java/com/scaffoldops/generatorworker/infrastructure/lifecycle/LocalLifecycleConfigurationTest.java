@@ -30,7 +30,7 @@ class LocalLifecycleConfigurationTest {
     void shouldEnableGeneratorApiLifecycleCallbackForLocalProfile() {
         assertThat(httpEnabled).isTrue();
         assertThat(baseUrl).isEqualTo("http://localhost:8081/api/generator/v1");
-        assertThat(statusUpdatePath).isEqualTo("/internal/generation-requests/{requestId}/status");
+        assertThat(statusUpdatePath).isEqualTo("/internal/generation-requests/{requestId}/generation-status");
         assertThat(bearerToken).isEmpty();
         assertThat(authMode).isEqualTo("static-token");
     }

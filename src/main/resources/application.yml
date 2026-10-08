@@ -24,7 +24,17 @@ info:
     version: 0.0.1-SNAPSHOT
 
 app:
+  artifact:
+    storage-type: ${GENERATOR_ARTIFACT_STORAGE_TYPE:filesystem}
+    minio:
+      endpoint: ${GENERATOR_MINIO_ENDPOINT:http://localhost:9000}
+      access-key: ${GENERATOR_MINIO_ACCESS_KEY:minioadmin}
+      secret-key: ${GENERATOR_MINIO_SECRET_KEY:minioadmin}
+      bucket: ${GENERATOR_MINIO_BUCKET:scaffoldops-artifacts}
   image-builder:
+    push-enabled: ${GENERATOR_DOCKER_PUSH_ENABLED:false}
+    registry: ${GENERATOR_IMAGE_REGISTRY:}
+    repository-prefix: ${GENERATOR_IMAGE_REPOSITORY_PREFIX:scaffoldops}
     build-enabled: ${GENERATOR_DOCKER_BUILD_ENABLED:true}
     docker-command: ${DOCKER_COMMAND:docker}
   generation:
@@ -39,7 +49,7 @@ app:
   lifecycle:
     base-url: ${GENERATOR_API_BASE_URL:http://generator-api-service/api/generator/v1}
     http-enabled: ${GENERATOR_API_LIFECYCLE_HTTP_ENABLED:false}
-    status-update-path: ${GENERATOR_API_LIFECYCLE_STATUS_UPDATE_PATH:/internal/generation-requests/{requestId}/status}
+    status-update-path: ${GENERATOR_API_LIFECYCLE_STATUS_UPDATE_PATH:/internal/generation-requests/{requestId}/generation-status}
     bearer-token: ${GENERATOR_API_BEARER_TOKEN:}
     auth:
       mode: ${GENERATOR_API_AUTH_MODE:client-credentials}
