@@ -10,7 +10,13 @@ public interface CleanupGeneratedArtifactUseCase {
     record Command(
             UUID requestId,
             String name,
+            String artifactRef,
+            String imageRef,
+            String deploymentNamespace,
             OffsetDateTime deletedAt
     ) {
+        public Command(UUID requestId, String name, OffsetDateTime deletedAt) {
+            this(requestId, name, null, null, null, deletedAt);
+        }
     }
 }

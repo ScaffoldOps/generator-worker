@@ -39,31 +39,68 @@ Generated artifacts include `pom.xml`, `Dockerfile`, Kubernetes manifests,
 `HelloApplication.java`, `HelloController.java`, and
 `generation-manifest.json`.
 
-When `generator-api` deletes a generation request, it publishes an
-`artifact-cleanup-requested` event. `generator-worker` consumes that event and
-deletes the matching generated artifact directory from its configured
-`GENERATION_MANIFEST_OUTPUT_DIR`.
+Delete is permanent. `DELETE /generation-requests/{id}` removes the database row
+and publishes `artifact-cleanup-requested`. Undeploy/disable keeps artifacts and
+images so the service can be restored or redeployed. HTTP 204 acknowledges the
+request; external removal finishes asynchronously.
 
-The cleanup flow is:
+Example cleanup payload (the three references/namespace are optional):
 
-```text
-DELETE /generation-requests/{id}
-  -> generator-api
-  -> Kafka topic artifact-cleanup-requested
-  -> generator-worker
-  -> PVC directory deletion
+```json
+{
+  "requestId": "2f5c3a0d-5a2e-4c6f-85d9-7e8d8ef4b4f5",
+  "name": "billing-service",
+  "artifactRef": "s3://scaffoldops-artifacts/2f5c3a0d-5a2e-4c6f-85d9-7e8d8ef4b4f5/project.zip",
+  "imageRef": "docker.io/victodomvar/scaffoldops-generated:billing-service-2f5c3a0d-5a2e-4c6f-85d9-7e8d8ef4b4f5",
+  "deploymentNamespace": "scaffoldops-dev",
+  "deletedAt": "2026-10-08T12:00:00Z"
+}
 ```
 
-Cleanup is idempotent: if the directory is already absent, the worker logs that
-state and treats the cleanup as successful. Cleanup is path-safe: the worker
-derives the directory from the stored request id and service name, normalizes
-the result, and only deletes below the configured manifest output directory.
-Cleanup is eventually consistent, not transactional with the API database
-delete; if `generator-worker` is down, cleanup waits until Kafka is consumed.
+The worker independently attempts each target, even if another fails:
 
-In MinIO mode, the PVC is workspace storage and the final artifact lives in MinIO.
-The existing cleanup consumer only deletes workspace directories; MinIO object
-retention must be managed separately (for example through bucket lifecycle rules).
+- The deterministic workspace under `GENERATION_MANIFEST_OUTPUT_DIR`.
+- The exact MinIO object for `s3://bucket/key`. An explicit trailing slash denotes
+  a recursive prefix; bucket-wide deletion is forbidden. It reuses the existing
+  MinIO client (`GENERATOR_ARTIFACT_STORAGE_TYPE=minio` and `GENERATOR_MINIO_*`).
+- A `file://` path only below the configured manifest root. Root deletion,
+  traversal and symlink ancestors are rejected; descendant symlinks are never followed.
+- The specific Docker Hub tag, when enabled and credentials are available.
+
+Missing workspace/file/object/tag is successful. Old events without references
+still remove the workspace. Namespace is retained as metadata; cleanup does not
+change deployment behavior or remove Kubernetes resources.
+
+External cleanup is best-effort: failures/skips log warnings and do not prevent
+other targets or fail the whole Kafka message. There is no automatic external
+retry or durable cleanup result; reconcile failed targets manually using retained
+Kafka payloads. Kafka retains work while the worker is offline. The API waits for
+Kafka acknowledgement within its DB transaction, but Kafka and PostgreSQL are
+not atomic: late publication or a crash/commit failure may remove assets while a
+row remains. Deletion during active generation can race with later asset creation;
+stop active work before deleting.
+
+Docker Hub cleanup configuration:
+
+| Property | Environment variable | Default |
+| --- | --- | --- |
+| `app.cleanup.docker-hub.enabled` | `GENERATOR_DOCKER_HUB_CLEANUP_ENABLED` | `false` |
+| `app.cleanup.docker-hub.base-url` | `GENERATOR_DOCKER_HUB_API_BASE_URL` | `https://hub.docker.com` |
+
+Reuse the existing Secret-backed `DOCKER_USERNAME` and `DOCKER_PASSWORD` image-builder
+credentials. Supply a Docker Hub PAT with **delete permission** for the generated
+repository, then set `GENERATOR_DOCKER_HUB_CLEANUP_ENABLED=true` on the worker.
+No new secret keys are needed. Never commit credentials. Production API endpoints
+require HTTPS; configure only a trusted Docker Hub endpoint because it receives
+credentials. The local Minikube setup works unchanged with cleanup disabled.
+
+The client exchanges credentials through `/v2/auth/token` and deletes only
+`/v2/namespaces/{namespace}/repositories/{repository}/tags/{tag}/` using the bearer
+token ([Docker Hub authentication](https://docs.docker.com/reference/api/hub/latest/operations/AuthCreateAccessToken/)).
+Explicit `namespace/repository:tag` references with optional Docker Hub registry
+prefixes are supported. Other registries, digest-only references and implicit
+`latest` are skipped with a warning; entire repositories/shared manifests are never deleted.
+A denied/unsupported API operation requires manual cleanup.
 
 ## Event contract
 

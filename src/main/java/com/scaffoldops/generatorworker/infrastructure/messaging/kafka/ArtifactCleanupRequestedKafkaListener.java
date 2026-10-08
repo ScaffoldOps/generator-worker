@@ -44,6 +44,9 @@ public class ArtifactCleanupRequestedKafkaListener {
         cleanupGeneratedArtifactUseCase.cleanup(new CleanupGeneratedArtifactUseCase.Command(
                 event.requestId(),
                 event.name(),
+                event.artifactRef(),
+                event.imageRef(),
+                event.deploymentNamespace(),
                 event.deletedAt()
         ));
     }

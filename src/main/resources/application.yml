@@ -19,6 +19,10 @@ spring:
 
 info:
   app:
+  cleanup:
+    docker-hub:
+      enabled: ${GENERATOR_DOCKER_HUB_CLEANUP_ENABLED:false}
+      base-url: ${GENERATOR_DOCKER_HUB_API_BASE_URL:https://hub.docker.com}
     title: ScaffoldOps Generator Worker
     description: Asynchronous worker shell for consuming generation jobs and driving generation lifecycle updates.
     version: 0.0.1-SNAPSHOT

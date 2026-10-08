@@ -82,14 +82,17 @@ Explicit settings:
 
 `application-dev.yml` points Kafka to `kafka.scaffoldops-dev.svc.cluster.local:9092`.
 
-Cleanup uses topic `artifact-cleanup-requested`. `generator-api` owns request
-lifecycle state and publishes this event after a generation request is deleted;
-`generator-worker` owns generated artifacts and consumes the event to remove
-`/var/lib/generator-worker/manifests/<serviceName>-<requestId>/` from the
-PVC-backed manifest directory. `generator-api` must not access the worker PVC
-directly. Missing directories are treated as success, and cleanup rejects paths
-that would escape the configured manifest output directory. Cleanup is
-eventually consistent, not transactional with the API database delete.
+Cleanup uses `artifact-cleanup-requested` with requestId, name, artifactRef,
+imageRef, deploymentNamespace and deletedAt. References/namespace are optional for
+legacy events. The service independently deletes the deterministic workspace and
+safe file artifacts; `ExternalArtifactCleanupAdapter` reuses MinIO for exact object
+or trailing-slash prefix deletion and performs opt-in Docker Hub tag cleanup.
+Missing targets are successful. External errors are logged without response bodies
+or credentials, and remaining targets continue; failed external cleanup requires
+manual reconciliation. Undeploy/disable retains artifacts and images. Delete is
+permanent and asynchronous; namespace does not trigger Kubernetes deletion.
+The API uses a DB transaction and awaits Kafka acknowledgement, but there is still
+a cross-system atomicity gap (no outbox). See README for configuration and races.
 
 ## Producer-side durability and idempotency
 

@@ -27,6 +27,9 @@ class ArtifactCleanupRequestedKafkaListenerTest {
         assertThat(useCase.command).isNotNull();
         assertThat(useCase.command.requestId()).isEqualTo(event.requestId());
         assertThat(useCase.command.name()).isEqualTo(event.name());
+        assertThat(useCase.command.artifactRef()).isEqualTo(event.artifactRef());
+        assertThat(useCase.command.imageRef()).isEqualTo(event.imageRef());
+        assertThat(useCase.command.deploymentNamespace()).isEqualTo(event.deploymentNamespace());
         assertThat(useCase.command.deletedAt()).isEqualTo(event.deletedAt());
     }
 
@@ -50,10 +53,23 @@ class ArtifactCleanupRequestedKafkaListenerTest {
         assertThat(useCase.command).isNull();
     }
 
+    @Test
+    void shouldAcceptLegacyJsonWithoutReferences() throws Exception {
+        var mapper = org.springframework.kafka.support.JacksonUtils.enhancedObjectMapper();
+        var event = mapper.readValue("{\"requestId\":\"11111111-1111-1111-1111-111111111111\",\"name\":\"billing\",\"deletedAt\":\"2026-03-07T10:15:30Z\"}", ArtifactCleanupRequestedEvent.class);
+        var useCase = new RecordingUseCase();
+        new ArtifactCleanupRequestedKafkaListener(useCase, kafkaTopicProperties()).onMessage(event);
+        assertThat(useCase.command.artifactRef()).isNull();
+        assertThat(useCase.command.imageRef()).isNull();
+    }
+
     private ArtifactCleanupRequestedEvent validEvent() {
         return new ArtifactCleanupRequestedEvent(
                 UUID.randomUUID(),
                 "billing-service",
+                "s3://artifacts/billing.zip",
+                "docker.io/owner/repo:billing",
+                "scaffoldops-dev",
                 OffsetDateTime.parse("2026-03-07T10:15:30Z")
         );
     }
