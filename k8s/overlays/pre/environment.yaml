@@ -1,0 +1,14 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: generator-worker
+spec:
+  template:
+    spec:
+      containers:
+        - name: generator-worker
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: "pre"
+            - name: GENERATOR_API_TOKEN_URL
+              value: "http://keycloak-pre.security.svc.cluster.local:8080/realms/scaffoldops-pre/protocol/openid-connect/token"

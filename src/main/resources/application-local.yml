@@ -1,0 +1,18 @@
+spring:
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
+app:
+  generation:
+    manifest-output-dir: ${GENERATION_MANIFEST_OUTPUT_DIR:${java.io.tmpdir}/generator-worker/manifests}
+    handoff-state-dir: ${GENERATION_HANDOFF_STATE_DIR:${java.io.tmpdir}/generator-worker/handoff}
+  lifecycle:
+    base-url: ${GENERATOR_API_BASE_URL:http://localhost:8081/api/generator/v1}
+    http-enabled: ${GENERATOR_API_LIFECYCLE_HTTP_ENABLED:true}
+    status-update-path: ${GENERATOR_API_LIFECYCLE_STATUS_UPDATE_PATH:/internal/generation-requests/{requestId}/generation-status}
+    bearer-token: ${GENERATOR_API_BEARER_TOKEN:}
+    auth:
+      mode: ${GENERATOR_API_AUTH_MODE:static-token}
+      token-url: ${GENERATOR_API_TOKEN_URL:}
+      client-id: ${GENERATOR_API_CLIENT_ID:}
+      client-secret: ${GENERATOR_API_CLIENT_SECRET:}

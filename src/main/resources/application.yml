@@ -1,0 +1,85 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: generator-worker
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: ${KAFKA_CONSUMER_GROUP:generator-worker}
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+    listener:
+      ack-mode: record
+      concurrency: 1
+      missing-topics-fatal: false
+
+info:
+  app:
+  cleanup:
+    docker-hub:
+      enabled: ${GENERATOR_DOCKER_HUB_CLEANUP_ENABLED:false}
+      base-url: ${GENERATOR_DOCKER_HUB_API_BASE_URL:https://hub.docker.com}
+    title: ScaffoldOps Generator Worker
+    description: Asynchronous worker shell for consuming generation jobs and driving generation lifecycle updates.
+    version: 0.0.1-SNAPSHOT
+
+app:
+  artifact:
+    storage-type: ${GENERATOR_ARTIFACT_STORAGE_TYPE:filesystem}
+    minio:
+      endpoint: ${GENERATOR_MINIO_ENDPOINT:http://localhost:9000}
+      access-key: ${GENERATOR_MINIO_ACCESS_KEY:minioadmin}
+      secret-key: ${GENERATOR_MINIO_SECRET_KEY:minioadmin}
+      bucket: ${GENERATOR_MINIO_BUCKET:scaffoldops-artifacts}
+  image-builder:
+    username: ${DOCKER_USERNAME:}
+    password: ${DOCKER_PASSWORD:}
+    push-enabled: ${GENERATOR_DOCKER_PUSH_ENABLED:true}
+    registry: ${GENERATOR_IMAGE_REGISTRY:docker.io}
+    repository-prefix: ${GENERATOR_IMAGE_REPOSITORY_PREFIX:victodomvar/scaffoldops-generated}
+    build-enabled: ${GENERATOR_DOCKER_BUILD_ENABLED:true}
+    max-attempts: ${GENERATOR_IMAGE_MAX_ATTEMPTS:3}
+    retry-backoff-ms: ${GENERATOR_IMAGE_RETRY_BACKOFF_MS:1000}
+    docker-command: ${DOCKER_COMMAND:docker}
+  generation:
+    manifest-output-dir: ${GENERATION_MANIFEST_OUTPUT_DIR:${java.io.tmpdir}/generator-worker/manifests}
+    handoff-state-dir: ${GENERATION_HANDOFF_STATE_DIR:${java.io.tmpdir}/generator-worker/handoff}
+  kafka:
+    topics:
+      image-build-retry-requested: ${IMAGE_BUILD_RETRY_REQUESTED_TOPIC:image-build-retry-requested}
+      generation-requested: ${GENERATION_REQUESTED_TOPIC:generation-requested}
+      deployment-requested: ${DEPLOYMENT_REQUESTED_TOPIC:deployment-requested}
+      generation-requested-dlt: ${GENERATION_REQUESTED_DLT_TOPIC:generation-requested-dlt}
+      artifact-cleanup-requested: ${ARTIFACT_CLEANUP_REQUESTED_TOPIC:artifact-cleanup-requested}
+  lifecycle:
+    base-url: ${GENERATOR_API_BASE_URL:http://generator-api-service/api/generator/v1}
+    http-enabled: ${GENERATOR_API_LIFECYCLE_HTTP_ENABLED:false}
+    status-update-path: ${GENERATOR_API_LIFECYCLE_STATUS_UPDATE_PATH:/internal/generation-requests/{requestId}/generation-status}
+    bearer-token: ${GENERATOR_API_BEARER_TOKEN:}
+    auth:
+      mode: ${GENERATOR_API_AUTH_MODE:client-credentials}
+      token-url: ${GENERATOR_API_TOKEN_URL:}
+      client-id: ${GENERATOR_API_CLIENT_ID:}
+      client-secret: ${GENERATOR_API_CLIENT_SECRET:}
+
+management:
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  endpoints:
+    web:
+      base-path: /actuator
+      exposure:
+        include: health,info
+
+# Retry topic: app.kafka.topics.image-build-retry-requested (default image-build-retry-requested).

@@ -1,0 +1,64 @@
+name: Deploy generator-worker to Kubernetes
+
+on:
+  workflow_call:
+    inputs:
+      namespace:
+        required: true
+        type: string
+      environment_name:
+        required: true
+        type: string
+      spring_profile:
+        required: true
+        type: string
+      image_version:
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    environment: ${{ inputs.environment_name }}
+    env:
+      NAMESPACE: ${{ inputs.namespace }}
+      ENVIRONMENT_NAME: ${{ inputs.environment_name }}
+      SPRING_PROFILE: ${{ inputs.spring_profile }}
+      IMAGE_NAME: victodomvar/scaffoldops-generator-worker
+      IMAGE_VERSION: ${{ inputs.image_version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          clean: true
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.32.0
+
+      - name: Deploy application
+        run: |
+          set -euo pipefail
+          case "${SPRING_PROFILE}:${NAMESPACE}:${ENVIRONMENT_NAME}" in
+            dev:scaffoldops-dev:DEV|pre:scaffoldops-pre:PRE) ;;
+            *) echo "Invalid deployment environment combination" >&2; exit 1 ;;
+          esac
+          [[ "${IMAGE_VERSION}" =~ ^[0-9a-f]{40}$ ]] || { echo "A full commit SHA image tag is required" >&2; exit 1; }
+
+          # Render the selected namespace, profile and immutable image in one apply.
+          render_dir=$(mktemp -d "${RUNNER_TEMP}/generator-worker.XXXXXX")
+          trap 'rm -rf "${render_dir}"' EXIT
+          cp -R k8s "${render_dir}/k8s"
+          printf '\nimages:\n  - name: %s\n    newTag: %s\n' "${IMAGE_NAME}" "${IMAGE_VERSION}" \
+            >> "${render_dir}/k8s/overlays/${SPRING_PROFILE}/kustomization.yaml"
+          kubectl kustomize "${render_dir}/k8s/overlays/${SPRING_PROFILE}" > "${render_dir}/deployment.yaml"
+
+          kubectl config use-context minikube
+          kubectl cluster-info
+
+          kubectl get namespace "${NAMESPACE}" >/dev/null 2>&1 || kubectl create namespace "${NAMESPACE}"
+
+          kubectl apply -f "${render_dir}/deployment.yaml" -n "${NAMESPACE}"
+          kubectl rollout status deployment/generator-worker -n "${NAMESPACE}" --timeout=300s
+          kubectl wait --for=condition=ready pod -l app=generator-worker -n "${NAMESPACE}" --timeout=300s

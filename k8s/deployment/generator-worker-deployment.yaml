@@ -1,0 +1,131 @@
+# Local Minikube MVP only: Docker socket access grants control of the node.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: generator-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: generator-worker
+  template:
+    metadata:
+      labels:
+        app: generator-worker
+    spec:
+      imagePullSecrets:
+        - name: docker-hub-pull-secret
+      volumes:
+        - name: docker-socket
+          hostPath:
+            path: /var/run/docker.sock
+            type: Socket
+        - name: generator-worker-data
+          persistentVolumeClaim:
+            claimName: generator-worker-artifacts-pvc
+      containers:
+        - name: generator-worker
+          image: victodomvar/scaffoldops-generator-worker:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: docker-socket
+              mountPath: /var/run/docker.sock
+            - name: generator-worker-data
+              mountPath: /var/lib/generator-worker
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: "dev"
+            - name: SPRING_KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka:9092"
+            - name: KAFKA_CONSUMER_GROUP
+              value: "generator-worker"
+            - name: GENERATION_REQUESTED_TOPIC
+              value: "generation-requested"
+            - name: ARTIFACT_CLEANUP_REQUESTED_TOPIC
+              value: "artifact-cleanup-requested"
+            - name: GENERATOR_API_BASE_URL
+              value: "http://generator-api-service/api/generator/v1"
+            - name: GENERATOR_API_LIFECYCLE_HTTP_ENABLED
+              value: "true"
+            - name: GENERATOR_API_AUTH_MODE
+              value: "client-credentials"
+            - name: GENERATOR_API_TOKEN_URL
+              value: "http://keycloak-dev.security.svc.cluster.local:8080/realms/scaffoldops-dev/protocol/openid-connect/token"
+            - name: GENERATOR_API_CLIENT_ID
+              value: "scaffoldops-generator-worker"
+            - name: GENERATOR_API_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: generator-api-worker-client
+                  key: client-secret
+            - name: GENERATION_MANIFEST_OUTPUT_DIR
+              value: "/var/lib/generator-worker/manifests"
+            - name: GENERATION_HANDOFF_STATE_DIR
+              value: "/var/lib/generator-worker/handoff"
+            - name: GENERATOR_ARTIFACT_STORAGE_TYPE
+              value: "minio"
+            - name: GENERATOR_MINIO_ENDPOINT
+              value: "http://minio:9000"
+            - name: GENERATOR_MINIO_BUCKET
+              value: "scaffoldops-artifacts"
+            - name: GENERATOR_MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: generator-worker-minio
+                  key: access-key
+            - name: GENERATOR_MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: generator-worker-minio
+                  key: secret-key
+            - name: GENERATOR_IMAGE_REGISTRY
+              value: "docker.io"
+            - name: GENERATOR_IMAGE_REPOSITORY_PREFIX
+              value: "victodomvar/scaffoldops-generated"
+            - name: GENERATOR_DOCKER_PUSH_ENABLED
+              value: "true"
+            - name: DOCKER_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: docker-hub-credentials
+                  key: DOCKER_USERNAME
+            - name: DOCKER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: docker-hub-credentials
+                  key: DOCKER_PASSWORD
+            - name: DOCKER_COMMAND
+              value: "docker"
+            - name: GENERATOR_DOCKER_BUILD_ENABLED
+              value: "true"
+          startupProbe:
+            # Clear out-of-band handlers during client-side apply reconciliation.
+            tcpSocket: null
+            exec: null
+            grpc: null
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            periodSeconds: 5
+            failureThreshold: 60
+            timeoutSeconds: 3
+          readinessProbe:
+            tcpSocket: null
+            exec: null
+            grpc: null
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: null
+            exec: null
+            grpc: null
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 15

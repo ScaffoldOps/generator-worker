@@ -1,0 +1,12 @@
+{
+  "requestId": "11111111-1111-1111-1111-111111111111",
+  "name": "billing-service",
+  "template": "spring-boot-hexagonal",
+  "database": true,
+  "restApi": true,
+  "security": true,
+  "messaging": false,
+  "deploymentTarget": "KUBERNETES",
+  "generationStatus": "RECEIVED",
+  "createdAt": 1772878530.000000000
+}

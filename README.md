@@ -1,94 +1,94 @@
 # generator-worker
 
-Asynchronous worker service for **ScaffoldOps** responsible for processing generation jobs after they are accepted by `generator-api`.
+Kafka worker that generates a minimal Spring Boot project, uploads a ZIP to MinIO, builds and pushes a Docker image, and reports generation results. Also handles scheduled image recovery and permanent asset cleanup.
 
-## Purpose
+Platform guides: [ScaffoldOps documentation](https://github.com/ScaffoldOps/scaffoldops-docs) · [local setup](https://github.com/ScaffoldOps/scaffoldops-docs/blob/main/docs/local-development.md) · [configuration](https://github.com/ScaffoldOps/scaffoldops-docs/blob/main/docs/configuration.md) · [known gaps](https://github.com/ScaffoldOps/scaffoldops-docs/blob/main/docs/findings.md).
 
-`generator-worker` is part of the ScaffoldOps platform, whose goal is to automate the generation and deployment of standardized microservices on Kubernetes. In the platform architecture, `generator-api` acts as the synchronous entrypoint, while `generator-worker` handles the long-running generation work asynchronously. :contentReference[oaicite:0]{index=0}
+## Local requirements
 
-This service exists to keep request handling separate from execution. It should consume generation work published by `generator-api`, generate the requested microservice from a template, and update lifecycle status as the work progresses. This separation keeps the API simple and moves retries, failures, and longer-running processing outside the request/response path. :contentReference[oaicite:1]{index=1}
+Java 17, Maven (wrapper included), a reachable Kafka broker and authenticated generator-api callbacks (for workers). Install Linux Docker CLI and provide a reachable Docker daemon, MinIO and Docker Hub credentials.
 
-## Responsibilities
+Kafka port-forward alone does not fix broker metadata advertising `kafka:9092`; use a broker with a host-reachable advertised listener for host execution. The cluster path is the documented MVP setup.
 
-`generator-worker` should own:
+## Configuration
 
-- consuming generation jobs or events produced by `generator-api`
-- loading the generation request data needed for processing
-- generating the microservice project from the selected template
-- producing the standard project structure and supporting files
-- updating lifecycle status during the generation phase
-- reporting success or failure back through persisted lifecycle state
+| Variable | Use |
+| --- | --- |
+| `KAFKA_BOOTSTRAP_SERVERS` | Host default `localhost:9092`; DEV broker `kafka:9092` |
+| `GENERATOR_API_BASE_URL` | Include `/api/generator/v1`; local profile defaults to `http://localhost:8081/api/generator/v1` |
+| `GENERATOR_API_LIFECYCLE_HTTP_ENABLED` | Set `true` for real callbacks |
+| `GENERATOR_API_AUTH_MODE` | `client-credentials` or local `static-token` |
+| `GENERATOR_API_TOKEN_URL`, `GENERATOR_API_CLIENT_ID`, `GENERATOR_API_CLIENT_SECRET` | OAuth callback credentials |
+| `GENERATOR_API_BEARER_TOKEN` | Local static-token alternative |
+| `GENERATOR_ARTIFACT_STORAGE_TYPE` | Default `filesystem`; DEV manifest selects `minio` |
+| `GENERATOR_MINIO_ENDPOINT`, `GENERATOR_MINIO_BUCKET` | Default `http://localhost:9000`, `scaffoldops-artifacts` |
+| `GENERATOR_MINIO_ACCESS_KEY`, `GENERATOR_MINIO_SECRET_KEY` | MinIO credentials |
+| `DOCKER_USERNAME`, `DOCKER_PASSWORD` | Docker Hub login credentials for image publishing |
+| `GENERATOR_IMAGE_REGISTRY`, `GENERATOR_IMAGE_REPOSITORY_PREFIX` | Default `docker.io`, `victodomvar/scaffoldops-generated` |
+| `GENERATION_MANIFEST_OUTPUT_DIR`, `GENERATION_HANDOFF_STATE_DIR` | Workspace and persisted handoff paths |
+| `SERVER_PORT` | Default `8080`; use `8082` for host execution |
 
-## What it should not do
+Namespace-local secrets: `generator-api-worker-client/client-secret`, `generator-worker-minio/access-key` and `secret-key`, and `docker-hub-credentials/DOCKER_USERNAME` and `DOCKER_PASSWORD`. These must exist separately in `scaffoldops-dev` and `scaffoldops-pre`, along with the registry pull secret `docker-hub-pull-secret` (type `kubernetes.io/dockerconfigjson`). Build/push are enabled by default; disabling them cannot produce a successful complete generation. See `src/main/resources/application*.yml` for topics and retry controls.
 
-`generator-worker` should not:
+## Build, test and run
 
-- expose the main public API for request submission
-- validate incoming client HTTP requests
-- act as the system of record for generation requests
-- replace `generator-api` as the lifecycle query endpoint
+Run from this repository root after provisioning the dependencies and exporting the variables above:
 
-If deployment is later separated into its own service, `generator-worker` should also not own Kubernetes deployment. For the MVP, that concern may remain combined temporarily if needed, but the intended architecture keeps generation and deployment conceptually distinct. :contentReference[oaicite:2]{index=2}
+```bash
+./mvnw clean test
+./mvnw clean package -DskipTests
+SPRING_PROFILES_ACTIVE=local SERVER_PORT=8082 GENERATOR_ARTIFACT_STORAGE_TYPE=minio GENERATOR_API_BEARER_TOKEN="$TOKEN" ./mvnw spring-boot:run
+```
 
-## Role in the platform flow
+## Docker and Kubernetes
 
-A typical ScaffoldOps flow is:
+```bash
+docker build -f Dockerfile -t victodomvar/scaffoldops-generator-worker:local .
+```
 
-1. the client sends a generation request to `generator-api`
-2. `generator-api` validates and persists the request
-3. `generator-api` assigns an initial status such as `RECEIVED`
-4. `generator-api` publishes a generation job or event
-5. `generator-worker` consumes that job
-6. `generator-worker` updates the request to a generation-in-progress state
-7. `generator-worker` generates the project from the requested template
-8. `generator-worker` updates the request to `GENERATED` or `FAILED`
+Build the JAR before docker build. CI publishes `victodomvar/scaffoldops-generator-worker` with `latest` and full commit SHA; both branch pipelines deploy the full SHA tag. GitHub Actions requires repository/organization secrets `DOCKER_USERNAME` and `DOCKER_PASSWORD` (a Docker Hub access token).
 
-This makes `generator-worker` the execution component for the generation phase, while `generator-api` remains the public lifecycle/status entrypoint for clients. :contentReference[oaicite:3]{index=3}
+After applying shared infrastructure and creating component secrets:
 
-## Lifecycle ownership
+```bash
+kubectl apply -k k8s/overlays/dev
+kubectl -n scaffoldops-dev rollout status deploy/generator-worker
+kubectl kustomize k8s/overlays/pre
+```
 
-The lifecycle is shared across services by stage:
+Use `k8s/overlays/dev` or `k8s/overlays/pre`, not the namespace-neutral `k8s/deployment` base. Direct overlay applies use `latest` for local smoke testing; CI renders a temporary copy with the full SHA image tag before a single apply, so no transient DEV profile or mutable image is deployed to PRE.
 
-- `generator-api` creates the request and sets the initial state
-- `generator-worker` owns the generation-stage transitions
-- a future `deployment-worker` can own deployment-stage transitions
+Both DEV and PRE are **local-only Minikube** configurations. The worker mounts `/var/run/docker.sock` from the node, which grants node-level Docker access and is unsuitable for production or untrusted tenants. PRE retains this limitation; it is not a production-safe image builder. The node must expose a Docker socket. Each namespace has its own `generator-worker-artifacts-pvc` mounted at `/var/lib/generator-worker`; workspace is `/var/lib/generator-worker/manifests`.
 
-Example lifecycle progression:
+Kafka (`kafka:9092`), MinIO (`http://minio:9000`) and the canonical API (`http://generator-api-service/api/generator/v1`, service port 80) resolve within the selected namespace. PRE uses profile `pre` and OAuth client `scaffoldops-generator-worker` in realm `scaffoldops-pre`, with token endpoint `http://keycloak-pre.security.svc.cluster.local:8080/realms/scaffoldops-pre/protocol/openid-connect/token`. Infrastructure provisioning, realms, clients, services, storage and secret values are managed separately.
 
-- `RECEIVED`
-- `GENERATING`
-- `GENERATED`
-- `DEPLOYING`
-- `DEPLOYED`
-- `FAILED`
+The legacy `generator-api:8081` alias remains a selector-backed ClusterIP service targeting API pods on port 8080. Do not convert it to ExternalName: DNS aliases cannot translate port 8081 to canonical port 80. The worker does not manage or overwrite the actual `generator-api-service` service.
 
-For `generator-worker`, the relevant transitions are typically:
+Offline deployment regression checks (requires `kubectl` and Python `PyYAML`):
 
-- `RECEIVED -> GENERATING`
-- `GENERATING -> GENERATED`
-- `GENERATING -> FAILED`
+```bash
+python3 scripts/validate-deployment.py
+```
 
-## Expected inputs
+Probe handlers explicitly null `tcpSocket`, `exec` and `grpc` when selecting
+`httpGet`. This removes manually added handlers that client-side apply would
+otherwise retain, avoiding Kubernetes' multiple-handler validation error.
+Validate reconciliation against existing DEV/PRE deployments without changing
+runtime resources (uses the workflow's SHA-tagged render):
 
-`generator-worker` is expected to process generation work created by `generator-api`.
+```bash
+python3 scripts/validate-deployment.py --server-dry-run --context minikube
+```
 
-That work should represent a generation request containing, at minimum, fields such as:
+## GitHub Actions
 
-- request id
-- service name
-- template
-- deployment target
-- optional capabilities such as database, REST API, security, and messaging
+- `pr-checks.yml`: Maven verification and tests for PRs to `develop`/`main` and feature branch pushes.
+- `develop-pipeline.yml`: verify, test, build/push image, deploy to `scaffoldops-dev`.
+- `main-pipeline.yml`: corresponding PRE pipeline targeting `scaffoldops-pre`.
+- `deploy-k8s.yml`: reusable `workflow_call` deployment, selects context `minikube` and waits for rollout; it is not manually dispatchable.
 
-The initial request contract in ScaffoldOps was defined around a declarative payload similar to:
+Jobs use self-hosted runners. PRE needs additional infrastructure; see [delivery guide](https://github.com/ScaffoldOps/scaffoldops-docs/blob/main/docs/delivery.md).
 
-```json
-{
-  "name": "billing-service",
-  "template": "spring-boot-hexagonal",
-  "database": true,
-  "restApi": true,
-  "security": true,
-  "messaging": false,
-  "deploymentTarget": "kubernetes"
-}
+## Troubleshooting
+
+Check `kubectl config current-context`, pods, events and component logs before restarting. For `ImagePullBackOff`, check the image/tag and namespace-local registry secret. `docker-hub-credentials` is Opaque application configuration and must never be used as `imagePullSecrets`. WSL runners need Linux Docker, daemon access, and a readable kubeconfig; a WindowsApps Docker shim can cause EACCES. Port conflicts require changing the local side of the port-forward. See [operations](https://github.com/ScaffoldOps/scaffoldops-docs/blob/main/docs/operations.md) for commands and lifecycle diagnostics.
