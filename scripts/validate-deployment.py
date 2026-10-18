@@ -1,5 +1,7 @@
-"""Offline manifest/workflow regression checks. Requires kubectl and PyYAML."""
+"""Manifest/workflow checks; opt-in server dry-runs never persist changes."""
 
+import argparse
+import json
 import os
 import pathlib
 import subprocess
@@ -7,6 +9,11 @@ import tempfile
 
 import yaml
 
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--server-dry-run", action="store_true", help="Validate apply reconciliation in DEV and PRE")
+parser.add_argument("--context", default="minikube", help="Explicit context for server dry-runs")
+args = parser.parse_args()
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -91,6 +98,9 @@ for profile, branch, environment in (("dev", "develop", "DEV"), ("pre", "main", 
         ("startupProbe", "liveness"), ("livenessProbe", "liveness"), ("readinessProbe", "readiness")
     ):
         assert container[probe]["httpGet"] == {"path": f"/actuator/health/{path}", "port": 8080}
+        for alternate in ("tcpSocket", "exec", "grpc"):
+            assert alternate in container[probe], f"{profile} {probe}: omitted handler would retain drift"
+            assert container[probe][alternate] is None, f"{profile} {probe}: alternate handler must be null"
     deploy = load(f".github/workflows/{branch}-pipeline.yml")["jobs"]["deploy"]
     assert deploy["with"] == {
         "namespace": namespace,
@@ -112,6 +122,26 @@ for profile, branch, environment in (("dev", "develop", "DEV"), ("pre", "main", 
                 f"victodomvar/scaffoldops-generator-worker:{sha}"
             )
         assert item in workflow_resources, "Workflow must only override the image tag"
+    if args.server_dry_run:
+        kubectl = ["kubectl", "--context", args.context, "-n", namespace]
+        get_deployment = [*kubectl, "get", "deployment", "generator-worker", "-o", "json"]
+        before = json.loads(subprocess.check_output(get_deployment, text=True))
+        applied = subprocess.run(
+            [*kubectl, "apply", "--dry-run=server", "-f", "-", "-o", "json"],
+            input=workflow_result.stdout, text=True, capture_output=True, check=True,
+        )
+        server_deployment = next(
+            item for item in json.loads(applied.stdout)["items"] if item["kind"] == "Deployment"
+        )
+        server_container = server_deployment["spec"]["template"]["spec"]["containers"][0]
+        for probe in ("startupProbe", "readinessProbe", "livenessProbe"):
+            assert server_container[probe]["httpGet"]
+            assert all(not server_container[probe].get(handler) for handler in ("tcpSocket", "exec", "grpc"))
+        after = json.loads(subprocess.check_output(get_deployment, text=True))
+        assert after["spec"] == before["spec"], "Dry-run must not change the live deployment spec"
+        assert after["metadata"]["generation"] == before["metadata"]["generation"]
+        assert after["metadata"]["annotations"] == before["metadata"]["annotations"]
+        print(f"PASS: {environment} server apply dry-run, exactly one handler per probe, runtime unchanged")
     print(f"PASS: {environment} manifests, namespace isolation, secret refs, alias, probes and pipeline")
 
 assert render_workflow("pre", "scaffoldops-dev", "PRE", sha).returncode != 0

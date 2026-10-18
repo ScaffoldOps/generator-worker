@@ -70,6 +70,16 @@ Offline deployment regression checks (requires `kubectl` and Python `PyYAML`):
 python3 scripts/validate-deployment.py
 ```
 
+Probe handlers explicitly null `tcpSocket`, `exec` and `grpc` when selecting
+`httpGet`. This removes manually added handlers that client-side apply would
+otherwise retain, avoiding Kubernetes' multiple-handler validation error.
+Validate reconciliation against existing DEV/PRE deployments without changing
+runtime resources (uses the workflow's SHA-tagged render):
+
+```bash
+python3 scripts/validate-deployment.py --server-dry-run --context minikube
+```
+
 ## GitHub Actions
 
 - `pr-checks.yml`: Maven verification and tests for PRs to `develop`/`main` and feature branch pushes.
