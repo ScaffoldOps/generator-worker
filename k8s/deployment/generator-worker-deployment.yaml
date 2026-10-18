@@ -3,7 +3,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: generator-worker
-  namespace: scaffoldops-dev
 spec:
   replicas: 1
   selector:
@@ -14,6 +13,8 @@ spec:
       labels:
         app: generator-worker
     spec:
+      imagePullSecrets:
+        - name: docker-hub-pull-secret
       volumes:
         - name: docker-socket
           hostPath:
@@ -45,7 +46,7 @@ spec:
             - name: ARTIFACT_CLEANUP_REQUESTED_TOPIC
               value: "artifact-cleanup-requested"
             - name: GENERATOR_API_BASE_URL
-              value: "http://generator-api:8081/api/generator/v1"
+              value: "http://generator-api-service/api/generator/v1"
             - name: GENERATOR_API_LIFECYCLE_HTTP_ENABLED
               value: "true"
             - name: GENERATOR_API_AUTH_MODE
@@ -99,13 +100,22 @@ spec:
               value: "docker"
             - name: GENERATOR_DOCKER_BUILD_ENABLED
               value: "true"
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            periodSeconds: 5
+            failureThreshold: 60
+            timeoutSeconds: 3
           readinessProbe:
-            tcpSocket:
+            httpGet:
+              path: /actuator/health/readiness
               port: 8080
             initialDelaySeconds: 15
             periodSeconds: 10
           livenessProbe:
-            tcpSocket:
+            httpGet:
+              path: /actuator/health/liveness
               port: 8080
             initialDelaySeconds: 30
             periodSeconds: 15

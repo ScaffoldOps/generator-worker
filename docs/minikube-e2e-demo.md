@@ -1,5 +1,11 @@
 # Minikube Generator MVP Demo
 
+Historical host-worker walkthrough. For current DEV/PRE Kubernetes deployment,
+use the overlays and prerequisite list in [README](../README.md#docker-and-kubernetes).
+Both environments retain local-only Minikube Docker socket access; neither is
+safe for production or untrusted tenants. Current manifests enable Docker builds
+and pushes and use MinIO; older filesystem-only examples below are historical.
+
 This demo validates the current MVP path:
 
 1. `generator-api` accepts a generation request.
@@ -241,7 +247,7 @@ jq -e \
 The Kubernetes manifests are present for smoke testing the pod wiring:
 
 ```bash
-kubectl apply -k k8s/deployment
+kubectl apply -k k8s/overlays/dev
 kubectl -n scaffoldops-dev get deploy,pod,svc -l app=generator-worker
 kubectl rollout status deployment/generator-worker -n scaffoldops-dev --timeout=300s
 kubectl -n scaffoldops-dev logs deploy/generator-worker -f
@@ -251,14 +257,14 @@ They configure:
 
 - `SPRING_KAFKA_BOOTSTRAP_SERVERS=kafka:9092`
 - `GENERATION_REQUESTED_TOPIC=generation-requested`
-- `GENERATOR_API_BASE_URL=http://generator-api:8081/api/generator/v1`
+- `GENERATOR_API_BASE_URL=http://generator-api-service/api/generator/v1`
 - `GENERATOR_API_LIFECYCLE_HTTP_ENABLED=true`
 - `GENERATOR_API_AUTH_MODE=client-credentials`
 - `GENERATOR_API_TOKEN_URL=http://keycloak-dev.security.svc.cluster.local:8080/realms/scaffoldops-dev/protocol/openid-connect/token`
 - `GENERATOR_API_CLIENT_ID=scaffoldops-generator-worker`
 - `GENERATOR_API_CLIENT_SECRET` from secret `generator-api-worker-client`,
   key `client-secret`
-- `GENERATOR_DOCKER_BUILD_ENABLED=false`
+- `GENERATOR_DOCKER_BUILD_ENABLED=true` (local-only Minikube socket)
 - generated output under `/var/lib/generator-worker`
 
 For deployed environments, Keycloak service names are environment-specific:
@@ -279,13 +285,14 @@ The worker exchanges that client secret for access tokens using Keycloak's
 before expiration; a lifecycle callback that receives `401 Unauthorized` is
 retried once after forcing a refresh.
 
-The manifests also create a `generator-api` Service alias on port `8081`
+The manifests preserve a selector-backed `generator-api` Service alias on port `8081`
 because the existing API service is named `generator-api-service` and exposes
-port `80`.
+port `80`. Callbacks now use the canonical service on port `80`. ExternalName
+cannot remap ports and must not replace the legacy selector service.
 
-In this Kubernetes mode the worker skips the direct `docker build` step because
-the pod does not have Docker access. Use the local-worker path above when the
-demo must prove that the generated Docker image is built.
+Current Kubernetes overlays mount the node Docker socket and build/push images.
+The node must expose `/var/run/docker.sock`; this grants node-level control and
+is supported only for local Minikube DEV/PRE demos.
 
 ## Kubernetes Artifact Persistence
 

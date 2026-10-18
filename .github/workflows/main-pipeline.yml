@@ -32,7 +32,6 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          cache: maven
 
       - name: Maven verify (skip tests)
         run: ./mvnw --batch-mode --no-transfer-progress verify -DskipTests
@@ -56,7 +55,6 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          cache: maven
 
       - name: Maven clean test
         run: ./mvnw --batch-mode --no-transfer-progress clean test
@@ -89,7 +87,6 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          cache: maven
 
       - name: Build application jar
         run: ./mvnw --batch-mode --no-transfer-progress clean package -DskipTests
@@ -136,7 +133,6 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          cache: maven
 
       - name: Build application jar
         run: ./mvnw --batch-mode --no-transfer-progress clean package -DskipTests
@@ -158,13 +154,13 @@ jobs:
             victodomvar/scaffoldops-generator-worker:${{ needs.docker_build.outputs.commit_sha }}
 
   deploy:
-    name: Deploy to DEV
+    name: Deploy to PRE
     needs:
       - docker_build
       - docker_push
     uses: ./.github/workflows/deploy-k8s.yml
     with:
-      namespace: scaffoldops-dev
-      environment_name: DEV
-      spring_profile: dev
-      image_version: latest
+      namespace: scaffoldops-pre
+      environment_name: PRE
+      spring_profile: pre
+      image_version: ${{ needs.docker_build.outputs.commit_sha }}

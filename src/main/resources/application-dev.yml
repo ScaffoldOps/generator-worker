@@ -12,7 +12,7 @@ app:
     topics:
       artifact-cleanup-requested: ${ARTIFACT_CLEANUP_REQUESTED_TOPIC:artifact-cleanup-requested}
   lifecycle:
-    base-url: ${GENERATOR_API_BASE_URL:http://generator-api-service.scaffoldops-dev.svc.cluster.local/api/generator/v1}
+    base-url: ${GENERATOR_API_BASE_URL:http://generator-api-service/api/generator/v1}
     http-enabled: ${GENERATOR_API_LIFECYCLE_HTTP_ENABLED:false}
     status-update-path: ${GENERATOR_API_LIFECYCLE_STATUS_UPDATE_PATH:/internal/generation-requests/{requestId}/generation-status}
     auth:
