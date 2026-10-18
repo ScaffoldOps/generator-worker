@@ -13,15 +13,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 class LocalMinikubeManifestTest {
     @Test
     @SuppressWarnings("unchecked")
-    void shouldMountNodeDockerSocketAndUseSecretCredentialsOnlyInDevManifest() throws Exception {
+    void shouldMountNodeDockerSocketAndUseSecretCredentialsInSharedLocalMinikubeManifest() throws Exception {
         Map<String, Object> deployment;
         try (var input = Files.newInputStream(Path.of("k8s/deployment/generator-worker-deployment.yaml"))) {
             deployment = new Yaml().load(input);
         }
-        assertThat(((Map<String, Object>) deployment.get("metadata")).get("namespace")).isEqualTo("scaffoldops-dev");
+        assertThat((Map<String, Object>) deployment.get("metadata")).doesNotContainKey("namespace");
         var spec = (Map<String, Object>) deployment.get("spec");
         var template = (Map<String, Object>) spec.get("template");
         var pod = (Map<String, Object>) template.get("spec");
+        assertThat((List<Map<String, Object>>) pod.get("imagePullSecrets"))
+                .containsExactly(Map.of("name", "docker-hub-pull-secret"));
         var volumes = (List<Map<String, Object>>) pod.get("volumes");
         assertThat(volumes).anySatisfy(volume -> {
             assertThat(volume.get("name")).isEqualTo("docker-socket");
@@ -32,6 +34,13 @@ class LocalMinikubeManifestTest {
         assertThat((List<Map<String, Object>>) container.get("volumeMounts")).anySatisfy(mount ->
                 assertThat(mount).containsEntry("name", "docker-socket").containsEntry("mountPath", "/var/run/docker.sock"));
         var env = (List<Map<String, Object>>) container.get("env");
+        assertThat(env).anySatisfy(value -> assertThat(value)
+                .containsEntry("name", "GENERATOR_API_BASE_URL")
+                .containsEntry("value", "http://generator-api-service/api/generator/v1"));
+        var startup = (Map<String, Object>) container.get("startupProbe");
+        assertThat(startup).containsEntry("failureThreshold", 60).containsEntry("periodSeconds", 5);
+        assertThat((Map<String, Object>) startup.get("httpGet"))
+                .containsEntry("path", "/actuator/health/liveness").containsEntry("port", 8080);
         for (String flag : List.of("GENERATOR_DOCKER_BUILD_ENABLED", "GENERATOR_DOCKER_PUSH_ENABLED")) {
             assertThat(env).anySatisfy(value -> assertThat(value).containsEntry("name", flag).containsEntry("value", "true"));
         }

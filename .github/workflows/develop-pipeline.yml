@@ -167,4 +167,4 @@ jobs:
       namespace: scaffoldops-dev
       environment_name: DEV
       spring_profile: dev
-      image_version: latest
+      image_version: ${{ needs.docker_build.outputs.commit_sha }}

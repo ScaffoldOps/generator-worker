@@ -158,13 +158,13 @@ jobs:
             victodomvar/scaffoldops-generator-worker:${{ needs.docker_build.outputs.commit_sha }}
 
   deploy:
-    name: Deploy to DEV
+    name: Deploy to PRE
     needs:
       - docker_build
       - docker_push
     uses: ./.github/workflows/deploy-k8s.yml
     with:
-      namespace: scaffoldops-dev
-      environment_name: DEV
-      spring_profile: dev
-      image_version: latest
+      namespace: scaffoldops-pre
+      environment_name: PRE
+      spring_profile: pre
+      image_version: ${{ needs.docker_build.outputs.commit_sha }}
