@@ -101,6 +101,10 @@ spec:
             - name: GENERATOR_DOCKER_BUILD_ENABLED
               value: "true"
           startupProbe:
+            # Clear out-of-band handlers during client-side apply reconciliation.
+            tcpSocket: null
+            exec: null
+            grpc: null
             httpGet:
               path: /actuator/health/liveness
               port: 8080
@@ -108,12 +112,18 @@ spec:
             failureThreshold: 60
             timeoutSeconds: 3
           readinessProbe:
+            tcpSocket: null
+            exec: null
+            grpc: null
             httpGet:
               path: /actuator/health/readiness
               port: 8080
             initialDelaySeconds: 15
             periodSeconds: 10
           livenessProbe:
+            tcpSocket: null
+            exec: null
+            grpc: null
             httpGet:
               path: /actuator/health/liveness
               port: 8080

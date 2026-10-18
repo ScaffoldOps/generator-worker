@@ -13,6 +13,28 @@ import static org.assertj.core.api.Assertions.assertThat;
 class LocalMinikubeManifestTest {
     @Test
     @SuppressWarnings("unchecked")
+    void shouldExplicitlyRemoveAlternateHandlersFromEveryProbeDuringApply() throws Exception {
+        Map<String, Object> deployment;
+        try (var input = Files.newInputStream(Path.of("k8s/deployment/generator-worker-deployment.yaml"))) {
+            deployment = new Yaml().load(input);
+        }
+        var spec = (Map<String, Object>) deployment.get("spec");
+        var template = (Map<String, Object>) spec.get("template");
+        var pod = (Map<String, Object>) template.get("spec");
+        var container = ((List<Map<String, Object>>) pod.get("containers")).get(0);
+        for (String name : List.of("startupProbe", "readinessProbe", "livenessProbe")) {
+            var probe = (Map<String, Object>) container.get(name);
+            assertThat(probe).as(name).containsKeys("httpGet", "tcpSocket", "exec", "grpc");
+            assertThat(probe.get("httpGet")).isNotNull();
+            for (String alternate : List.of("tcpSocket", "exec", "grpc")) {
+                // Omission preserves manually added handlers absent from last-applied configuration.
+                assertThat(probe).as(name).containsEntry(alternate, null);
+            }
+        }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
     void shouldMountNodeDockerSocketAndUseSecretCredentialsInSharedLocalMinikubeManifest() throws Exception {
         Map<String, Object> deployment;
         try (var input = Files.newInputStream(Path.of("k8s/deployment/generator-worker-deployment.yaml"))) {
